@@ -1,7 +1,10 @@
+from RPi import GPIO
+
 import atexit
 import copy
 import json
 import logging
+import serial
 import time
 
 from logging import critical, error, warning, info, debug
@@ -32,6 +35,23 @@ def setup_logging(**kwargs):
 
     logging.basicConfig(**kwargs)
 
+
+def setup_serial(device='/dev/ttyUSB0', baudrate=9600):
+    debug("Getting heater serial connection...")
+
+    try:
+        ser = serial.Serial(device, baudrate, timeout=1)
+        info("Heater connected via serial connection.")
+
+    except:
+        error("Failed to start serial connection.  The program will exit.")
+        raise
+
+    else:
+        atexit.register(ser.close)
+        return ser
+
+
 def log_thread_start(func, thread):
     func("Started thread %s [%s]."
          % (thread.name, thread.native_id))
@@ -50,7 +70,7 @@ def get_config_file():
                                 path.expanduser('~/.config'))
         config_file = path.join(base_path, 'mercury')
 
-    logging.info("Using config file: %s" % config_file)
+    info("Using config file: %s" % config_file)
     return config_file
 
 
@@ -72,8 +92,8 @@ def save_settings(config, config_file, setpoint):
     with open(config_file, 'w') as f:
         json.dump(saveconfig, f)
 
-    logging.info("Settings saved to %s. Setpoint: %s°C"
-                 % (config_file, str(setpoint)))
+    info("Settings saved to %s. Setpoint: %s°C"
+         % (config_file, str(setpoint)))
 
 
 def setup_playtone(speaker_pin, magic_number=600):
@@ -83,7 +103,7 @@ def setup_playtone(speaker_pin, magic_number=600):
         p = GPIO.PWM(speaker_pin, magic_number)
         p.start(0)
     except:
-        logging.critical('Could not initialize PWM')
+        critical('Could not initialize PWM')
         raise
 
     playtone.p = p
@@ -98,7 +118,7 @@ def playtone(tone):
     p = getattr(playtone, 'p', None)
 
     if not p:
-        logging.error('Speaker must be initialized before use!')
+        error('Speaker must be initialized before use!')
         return
 
     if tone == 1:
@@ -128,4 +148,3 @@ def playtone(tone):
         for i in range(0, 3):
             playtone(3)
             time.sleep(0.1)
-
