@@ -4,14 +4,28 @@ import json
 import logging
 import time
 
+from logging import critical, error, warning, info, debug
 from os import environ, path
 
-from RPi import GPIO
+
+def try_function(on_failure, method, *args, **kwargs):
+    '''Attempt to run method, passing arguments *args and **kwargs. If it
+    fails, defer to on_failure callback
+
+    '''
+
+    try:
+        method(*args, **kwargs)
+    except Exception:
+        logging.exception("Failed to run function %s.%s"
+                          % (method.__module__, method.__name__))
+        on_failure()
 
 
 def setup_logging(**kwargs):
     '''Setup logging so that it includes timestamps.'''
 
+    kwargs.setdefault('force', True)
     kwargs.setdefault('level', logging.INFO)
     kwargs.setdefault('format', '%(levelname)-8s %(message)s')
     kwargs.setdefault('datefmt', '%Y-%m-%d %H:%M:%S')

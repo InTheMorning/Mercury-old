@@ -14,7 +14,6 @@ import logging
 import serial
 import signal
 import struct
-import time
 import requests
 
 from mercury.utils import (
@@ -23,126 +22,68 @@ from mercury.utils import (
     get_config_file,
     load_settings,
     save_settings,
-    setup_playtone,
     playtone,
 )
 
 
-setup_logging(level=logging.INFO)
+class State:
+    '''Stores all mutable application state'''
 
-# Initialize variables
-tt_in = 0
-setback = 0
-forecast_day = 0
-latest_weather = None
-spressure = 0
-shumidity = 0
-blinker = True
-last_blinker_refresh = time.monotonic()
-run = True
-toggledisplay = True
-refetch = True
-htrstate = ['Off', 'Fan only', 'Low Heat', 'Full Heat']
-htrstatus = htrstate[0]
-stemp = False
+    def __init__(self):
+        self.tt_in = 0
+        self.setback = 0
+        self.forecast_day = 0
+        self.latest_weather = None
+        self.stemp = False
+        self.spressure = 0
+        self.shumidity = 0
+        self.blinker = True
+        self.displayed_time_last_refresh = 0
+        self.blinker_last_refresh = 0
+        self.run = True
+        self.toggledisplay = True
+        self.refetch = True
+        self.htrstatus = HeaterState.OFF
 
-# 0 Heater status
-# 1 Time
-# 2 Setpoint
-# 3 Sensor data
-# 4 Weather data
-drawlist = [True, True, True, True, True]
+        self.setpoint = 20
 
-# Define GPIO inputs
-rotaryA = 7
-rotaryB = 11
-rotarybutton = 13
-resetbutton = 22
+        # Defaults
+        self.setpoint = 20   # in celsius
+        self.sensortimeout = 300
+        self.heartbeatinterval = 30
+        self.temp_tolerance = 1.8
+        self.refreshrate = 0.1 		# in seconds
+        self.target_temp = self.setpoint
 
-# Define GPIO outputs
-speaker = 12
+        # 0 Heater status
+        # 1 Time
+        # 2 Setpoint
+        # 3 Sensor data
+        # 4 Weather data
+        self.drawlist = [True, True, True, True, True]
 
-# Name display screen elements
-screenelements = ["Heater status", "Time", "Temperature setpoint", "Sensor info", "Weather info"]
+        self.configfile = None
 
-
-configfile = get_config_file()
-
-# Arduino Serial connect
-debug("Getting heater serial connection...")
-try:
-    ser = serial.Serial('/dev/ttyUSB0',  9600, timeout=1)
-    info("Heater connected via serial connection.")
-except:
-    error("Failed to start serial connection.  The program will exit.")
-    run = False
-
-# Initialize GPIO
-debug("Setting GPIO modes...")
-try:
-    GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(rotaryA, GPIO.IN)
-    GPIO.setup(rotaryB, GPIO.IN)
-    GPIO.setup(rotarybutton, GPIO.IN)
-    setup_playtone(speaker, 600)
-    info("Set GPIO: Rotary=%s,%s Button=%s Pcspkr=%s"
-         % (rotaryA, rotaryB, rotarybutton, speaker))
-except:
-    critical("GPIO init failed.  The program will exit.")
-    run = False
+        self.serial = None
+        self.lhs = [None, None, None]
 
 
-# (re)start char LCD
-def startlcd(retry):
-    global run, drawlist
-    try:
-        debug("Starting LCD display...")
-        trylcd = i2c_charLCD.lcd()
-        trylcd.backlight(1)
-        trylcd.lcd_clear()
-        info("Started LCD display.")
-        drawlist = [True, True, True, True, True]
-        return trylcd
-    except:
-        if not retry:
-            critical("LCD display init failed.  The program will exit.")
-            run = False
-        else:
-            warning("LCD display init failed.")
-            return False
+class HeaterState(Enum):
+    OFF = 0
+    FAN_ONLY = 1
+    LOW_HEAT = 2
+    FULL_HEAT = 3
 
+    @property
+    def pretty_name(self):
+        _pretty_names = {
+            HeaterState.OFF: 'OFF',
+            HeaterState.FAN_ONLY: 'FAN only',
+            HeaterState.LOW_HEAT: 'Low Heat',
+            HeaterState.FULL_HEAT: 'Full Heat',
+        }
 
-mylcd = startlcd(False)
-
-
-def displayfail():
-    global mylcd
-
-    warning("Communication failed with display, re-initializing...")
-    time.sleep(1)
-    mylcd = startlcd(True)
-    time.sleep(1)
-
-
-# Defaults
-setpoint = 20   # in celsius
-sensortimeout = 300
-heartbeatinterval = 30
-temp_tolerance = 1.8
-refreshrate = 0.1 		# in seconds
-target_temp = setpoint
-
-# Load saved data
-try:
-    config = load_settings(configfile)
-except FileNotFoundError:
-    critical('Config file (%s) does not exist!' % configfile)
-    raise
-
-
-setpoint = float(config['setpoint'])
-weatherapikey = config['weatherapikey']
-locationid = config['locationid']
+        return _pretty_names[self]
 
 
 # OS signal handler
@@ -210,8 +151,8 @@ def getweather():
             time.sleep(next_check_seconds)
 
 
-def fetchhtrstate():
-    output = (chr(9+48)+'\n').encode("utf-8")
+def fetchhtrstate(serial):
+    output = b'9\n'
 
     debug("sending status request (%s) to the heater" % output)
 
@@ -231,8 +172,12 @@ def fetchhtrstate():
 
 
 def heartbeat():
-    global htrstatus, htrstate, drawlist, stemp, lhs, target_temp, refetch
-    global heartbeatinterval
+    lhs = state.lhs
+    stemp = state.stemp
+    target_temp = state.target_temp
+    heartbeatinterval = state.heartbeatinterval
+    drawlist = state.drawlist
+    lastfetch = monotonic()
 
     lastfetch = time.monotonic()
 
@@ -258,15 +203,20 @@ def heartbeat():
 		        #    remember/reset time, heater state, and
 		        #    temperature
                         drawlist[0] = True
-                        htrstatus = htrstate[getstatus]
-                        info(('Current: {stemp:.2f}°C,  Target: {target_temp:.2f}°C. '
-                              '{previousstatus!r} → now is {htrstatus!r}.').format(
-                            stemp=stemp,
-                            target_temp=target_temp,
-                            previousstatus=previousstatus,
-                            htrstatus=htrstatus))
+                        state.htrstatus = current_status
 
-                        lhs = [datetime.datetime.now(), htrstatus, stemp]
+                        info('Current: {stemp:.2f}°C, '
+                             'Target: {target_temp:.2f}°C. '
+                             '{previousstatus!r} → now is {heater_status!r}.'
+                             .format(
+                                 selftemp=stemp,
+                                 target_temp=target_temp,
+                                 previousstatus=previousstatus.pretty_name,
+                                 heater_status=state.htrstatus.pretty_name))
+
+                        lhs[:] = [datetime.datetime.now(),
+                                  state.htrstatus,
+                                  state.stemp]
                 else:
                     error("Got invalid status: %r" % getstatus)
 
@@ -371,10 +321,10 @@ def htrtoggle(state):
         warning("toggled heater %s, but already set to %s." % (state, htrstatus))
 
     else:
-        output = (chr(state+48)+'\n').encode("utf-8")
-        ser.write(output)
-        time.sleep(0.1)
-        refetch = True
+        output = b'%d\n' % st.value
+        state.serial.write(output)
+        sleep(0.1)
+        state.refetch = True
 
         debug("sent state change to heater: %s" % state)
         debug("confirming heater status...")
@@ -430,7 +380,7 @@ def thermostat():
     debug("Got hvac status: %s" % htrstatus)
 
     # endtime, last state, last temp
-    lhs = [datetime.datetime.now(), htrstatus, stemp]
+    lhs[:] = [datetime.datetime.now(), state.htrstatus, state.stemp]
 
     threads['schedule'].start()
     threads['weather'].start()
@@ -487,19 +437,15 @@ def thermostat():
                 #     print (now, status_string)
                 #     htrtoggle(3)
 
-        elif htrstatus == htrstate[3]:
-            debug("staying %.1f minutes in stage 2" % (stage2timeout/60))
+        elif current_htrstatus == HeaterState.FULL_HEAT:
+            debug("staying %.1f minutes in stage 2" % (stage2timeout / 60))
 
             if seconds % stage2timeout <= 1:
-                if stemp + (stemp - lasttemp) > target_temp:
-                    info('Predicted target temperature in %.1f minutes' % (stage2timeout/60))
-                    # htrtoggle(2)
-                # elif (stemp - lasttemp)*seconds >= stage2max*3600:    #       If heating too quickly -> stage 1.
-                #     print (now, "Heating too quickly: (", (stemp - lasttemp)*seconds, "°C/hr ,max=", stage2max, "°C/hr)")
-                #     print (now, status_string)
-                #     htrtoggle(2)
+                if stemp + (stemp - lasttemp) > state.target_temp:
+                    info('Predicted target temperature in %.1f minutes'
+                         % (stage2timeout / 60))
 
-        elif htrstatus == htrstate[1]:
+        elif current_htrstatus == HeaterState.FAN_ONLY:
             pass
             # print (int(fantimeout-floor(seconds%fantimeout)-1), "    Fan    ", end='\r')
             # if seconds >= fantimeout:
@@ -529,8 +475,15 @@ def thermostat():
 def drawstatus(element):
     # Draw mode 0 (status screen)
     # print ("refreshing screen element ", element)
-    global latest_weather, stemp, shumidity, target_temp, setpoint, htrstatus
-    global displayed_time, blinker, last_blinker_refresh
+
+    def try_draw(method, *args, **kwargs):
+        kwargs.setdefault('state', state)
+        kwargs.setdefault('lcd', state.lcd)
+
+        try_function(partial(drawing.displayfail, state),
+                     method,
+                     *args,
+                     **kwargs)
 
     debug("refreshing screen element %s (%s)"
           % (element, screenelements[element]))
@@ -622,15 +575,16 @@ def drawstatus(element):
                 displayfail()
 
 def redraw():
-    global drawlist
+    drawlist = state.drawlist
+    threads = state.threads
 
     log_thread_start(info, threads['display'])
 
     while True:
         if not toggledisplay:
             try:
-                mylcd.lcd_clear()
-                mylcd.backlight(0)
+                state.lcd.lcd_clear()
+                state.lcd.backlight(0)
             except:
                 pass
             return
@@ -644,10 +598,10 @@ def redraw():
 
         now = time.monotonic()
         # Decide if we should redraw the time...
-        if (now - displayed_time) > 30:
+        if (now - state.displayed_time_last_refresh) > 30:
             drawlist[1] = True
         # ...or just the blinker
-        elif (now - last_blinker_refresh) >= 1:
+        elif (now - state.blinker_last_refresh) >= 1:
             drawlist[1] = 2
 
         time.sleep(refreshrate)
@@ -678,7 +632,30 @@ def rotaryevent(event):
     elif event == 2:
         tt_in -= 0.1
         playtone(2)
-    time.sleep(0.01)
+    sleep(0.01)
+
+
+@click.command()
+@click.option('-c', '--config-file', type=click.Path(),
+              default=get_config_file)
+@click.option('-d', '--debug', is_flag=True)
+@click.option('-v', '--verbose', count=True)
+def main(config_file, debug, verbose):
+    global state
+
+    if debug:
+        # debugging overrides verbosity
+        verbose = 10
+
+    # Verbosity starts at 0, most quiet, while Python logging has 50
+    # meaning critical errors only.  Therefore, we calculate verbosity
+    # by reversing the value and mapping it over 30–0
+    logging_level = max(1, (3 - verbose)) * 10
+    setup_logging(level=logging_level)
+
+    state = State()
+
+    state.configfile = config_file
 
 
 # This is the event callback routine to handle events
@@ -731,4 +708,4 @@ def main(verbose):
 
 
 if __name__ == '__main__':
-    main()
+    main(auto_envvar_prefix="MERCURY")
