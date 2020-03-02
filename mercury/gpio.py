@@ -5,8 +5,8 @@ import atexit
 
 from logging import critical, info, debug
 
-ROTARY_A = 7
-ROTARY_B = 11
+ROTARY_A = 11
+ROTARY_B = 7
 BUTTON = 13
 
 GPIO_DEFAULT_INPUTS = {
@@ -58,8 +58,8 @@ def setup_gpio(inputs=_DEFAULT, outputs=_DEFAULT):
 
 
 # This is the event callback routine to handle events
-def switch_event(callback, event):
-    if event == RotaryEncoder.CLOCKWISE:
+def switch_event(callback, direction):
+    if direction == 1:
         callback(1)
-    elif event == RotaryEncoder.ANTICLOCKWISE:
-        callback(2)
+    elif direction == -1:
+        callback(-1)

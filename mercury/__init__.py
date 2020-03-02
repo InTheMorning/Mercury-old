@@ -542,12 +542,12 @@ def ui_input():
 
 
 # Define rotary actions depending on current mode
-def rotaryevent(event):
+def rotaryevent(direction):
 
-    if event == 1:
+    if direction == 1:
         state.tt_in += 0.1
         playtone(1)
-    elif event == 2:
+    elif direction == -1:
         state.tt_in -= 0.1
         playtone(2)
     sleep(0.01)

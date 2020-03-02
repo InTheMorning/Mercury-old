@@ -1,113 +1,68 @@
-#!/usr/bin/python
-'''
- FileName:     Rotary_Encoder-1a.py
- Purpose:      This program decodes a rotary encoder switch.
+from RPi import GPIO
 
 
-
- Note:         All dates are in European format DD-MM-YY[YY]
-
- Author:       Paul Versteeg
-
- Created:      23-Nov-2015
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>
-'''
-
-import RPi.GPIO as GPIO
-from time import sleep
+GPIO_A, GPIO_B, GPIO_BUTTON = (0, 0, 0)
 
 
 class RotaryEncoder:
+    """
+    A class to decode mechanical rotary encoder pulses.
+    """
 
-    CLOCKWISE = 1
-    ANTICLOCKWISE = 2
-    BUTTONDOWN = 3
-    BUTTONUP = 4
-
-# GPIO Ports
-
-    def __init__(self, pinA, pinB, button, callback):
-
-        self.pinA = pinA
-        self.pinB = pinB
-        self.button = button
+    def __init__(self,
+                 pinA,
+                 pinB,
+                 button,
+                 callback=None,
+                 button_callback=None
+                 ):
+        """
+        Instatiate the class with the two callbacks.
+        The callback receives one argument:
+        a `delta` that will be either 1 or -1.
+        """
+        global GPIO_A, GPIO_B, GPIO_BUTTON
+        GPIO_A, GPIO_B, GPIO_BUTTON = (pinA, pinB, button)
+        self.last_gpio = None
         self.callback = callback
+        self.button_callback = button_callback
 
-        GPIO.setwarnings(True)
+        self.levA = 0
+        self.levB = 0
 
-        # Use the Raspberry Pi BOARD pins
-        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(GPIO_A, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(GPIO_B, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(GPIO_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        # define the Encoder switch inputs
-        GPIO.setup(self.pinA, GPIO.IN)
-        GPIO.setup(self.pinB, GPIO.IN)
-        GPIO.setup(self.button, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.add_event_detect(GPIO_A, GPIO.BOTH, self._callback)
+        GPIO.add_event_detect(GPIO_B, GPIO.BOTH, self._callback)
+        GPIO.add_event_detect(
+                              GPIO_BUTTON,
+                              GPIO.FALLING,
+                              self._button_callback,
+                              bouncetime=500
+                              )
 
-        # setup an event detection thread for the A encoder switch
-        GPIO.add_event_detect(self.pinA,
-                              GPIO.RISING,
-                              callback=self.rotation_decode,
-                              bouncetime=1)
+    def _button_callback(self, channel):
+        self.button_callback(GPIO.input(channel))
 
-        # setup an event detection thread for the button switch
-        GPIO.add_event_detect(self.button,
-                              GPIO.BOTH,
-                              callback=self.button_event,
-                              bouncetime=80)
-        return
+    def _callback(self, channel):
+        level = GPIO.input(channel)
+        if channel == GPIO_A:
+            self.levA = level
+        else:
+            self.levB = level
 
-    def rotation_decode(self, switch):
-
-        # sleep(0.002) # extra 2 mSec de-bounce time
-
-        # read both of the switches
-        Switch_A = GPIO.input(self.pinA)
-        Switch_B = GPIO.input(self.pinB)
-
-        if (Switch_A == 1) and (Switch_B == 0):  # A then B ->
-            event = self.CLOCKWISE
-            self.callback(event)
-
-            # at this point, B may still need to go high, wait for it
-            while Switch_B == 0:
-                Switch_B = GPIO.input(self.pinB)
-            # now wait for B to drop to end the click cycle
-            while Switch_B == 1:
-                Switch_B = GPIO.input(self.pinB)
-
-        elif (Switch_A == 1) and (Switch_B == 1):  # B then A <-
-            event = self.ANTICLOCKWISE
-            self.callback(event)
-
-# A is already high, wait for A to drop to end the click cycle
-        while Switch_A == 1:
-            Switch_A = GPIO.input(self.pinA)
-
-        else:  # discard all other combinations
+        # Debounce.
+        if channel == self.last_gpio:
             return
 
-# Push button event
-    def button_event(self, button):
-        sleep(0.010)
-        if GPIO.input(button):
-            event = self.BUTTONUP
-        else:
-            event = self.BUTTONDOWN
-        self.callback(event)
-        return
-
-# Get a switch state
-    def getSwitchState(self, switch):
-        return GPIO.input(switch)
+        # If A was the most recent pin set high, it'll be forward
+        # if B was the most recent pin set high, it'll be reverse.
+        self.last_gpio = channel
+        if channel == GPIO_A and level == 1:
+            if self.levB == 1:
+                self.callback(1)
+        elif channel == GPIO_B and level == 1:
+            if self.levA == 1:
+                self.callback(-1)
