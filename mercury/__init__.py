@@ -20,12 +20,16 @@ from mercury.config import (
     load_settings,
     save_settings,
 )
+from mercury.speaker import (
+    setup_tone_player,
+    tone_player,
+    Sound,
+)
 from mercury.utils import (
     try_function,
     setup_logging,
     setup_serial,
     logged_thread_start,
-    playtone,
 )
 
 state = None
@@ -542,10 +546,10 @@ def rotaryevent(direction):
 
     if direction == 1:
         state.tt_in += 0.1
-        playtone(1)
+        tone_player(Sound.TIC)
     elif direction == -1:
         state.tt_in -= 0.1
-        playtone(2)
+        tone_player(Sound.TIC)
     sleep(0.01)
 
 
@@ -588,6 +592,8 @@ def main(config_file, debug, verbose):
         state.serial = serial
 
     gpio.setup_gpio()
+
+    setup_tone_player(gpio.SPEAKER)
 
     # Define the switch
     gpio.RotaryEncoder(

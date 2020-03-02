@@ -1,12 +1,9 @@
-from RPi import GPIO
-
 import atexit
 import logging
 import serial
-import time
 
 from functools import wraps
-from logging import critical, error, info, debug
+from logging import error, info, debug
 from threading import current_thread as get_current_thread
 
 
@@ -60,57 +57,3 @@ def logged_thread_start(func):
         return func(*args, **kwargs)
 
     return wrapper
-
-
-def setup_playtone(speaker_pin, magic_number=600):
-    try:
-        GPIO.setup(speaker_pin, GPIO.OUT)
-
-        p = GPIO.PWM(speaker_pin, magic_number)
-        p.start(0)
-    except BaseException:
-        critical('Could not initialize PWM')
-        raise
-
-    playtone.p = p
-    atexit.register(destroy_playtone, p)
-
-
-def destroy_playtone(p):
-    p.stop()
-
-
-def playtone(tone):
-    p = getattr(playtone, 'p', None)
-
-    if not p:
-        error('Speaker must be initialized before use!')
-        return
-
-    if tone == 1:
-        p.ChangeDutyCycle(100)
-        time.sleep(0.01)
-        p.ChangeDutyCycle(0)
-
-    elif tone == 2:
-        p.ChangeDutyCycle(100)
-        time.sleep(0.01)
-        p.ChangeDutyCycle(0)
-
-    elif tone == 3:
-        p.ChangeDutyCycle(50)
-        p.ChangeFrequency(880)
-        time.sleep(0.05)
-        p.ChangeDutyCycle(0)
-        p.ChangeFrequency(50)
-
-    elif tone == 4:
-        p.ChangeFrequency(220)
-        p.ChangeDutyCycle(50)
-        time.sleep(0.05)
-        p.ChangeDutyCycle(0)
-
-    elif tone == 5:
-        for i in range(0, 3):
-            playtone(3)
-            time.sleep(0.1)

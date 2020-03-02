@@ -8,6 +8,7 @@ from logging import critical, info, debug
 ROTARY_A = 11
 ROTARY_B = 7
 BUTTON = 13
+SPEAKER = 12
 
 GPIO_DEFAULT_INPUTS = {
     'RotaryA': ROTARY_A,
@@ -16,7 +17,9 @@ GPIO_DEFAULT_INPUTS = {
     # 'Reset', 22,
 }
 
-GPIO_DEFAULT_OUTPUTS = {}
+GPIO_DEFAULT_OUTPUTS = {
+    'Speaker': SPEAKER
+}
 
 _DEFAULT = object()
 
