@@ -57,7 +57,7 @@ class State:
         self.sensortimeout = 300
         self.heartbeatinterval = 30
         self.temp_tolerance = 1.8
-        self.refreshrate = 0.1 		# in seconds
+        self.refreshrate = 0.06 		# in seconds
         self.target_temp = self.setpoint
 
         # 0 Heater status
@@ -459,8 +459,6 @@ def thermostat():
 
 
 def drawstatus(element):
-    # Draw mode 0 (status screen)
-    # print ("refreshing screen element ", element)
 
     def try_draw(method, *args, **kwargs):
         kwargs.setdefault('state', state)
@@ -500,28 +498,27 @@ def redraw():
     drawlist = state.drawlist
 
     while True:
+        now = monotonic()
+
+        if (now - state.displayed_time_last_refresh) > 30:
+            drawlist[1] = True
+        elif (now - state.blinker_last_refresh) >= 1:
+            drawlist[1] = 2
+
         if not state.toggledisplay:
+
             try:
                 state.lcd.clear()
                 state.lcd.backlight(0)
             except BaseException:
                 pass
             return
-
         else:
-            for i in range(0, len(drawlist)):
-                if drawlist[i]:
+            for (i, e) in enumerate(drawlist):
+                if e:
                     drawstatus(i)
                     drawlist[i] = False
                     sleep(0.01)
-
-        now = monotonic()
-        # Decide if we should redraw the time...
-        if (now - state.displayed_time_last_refresh) > 30:
-            drawlist[1] = True
-        # ...or just the blinker
-        elif (now - state.blinker_last_refresh) >= 1:
-            drawlist[1] = 2
 
         sleep(state.refreshrate)
 
@@ -529,7 +526,6 @@ def redraw():
 @logged_thread_start
 def ui_input():
     drawlist = state.drawlist
-
     while True:
         if state.tt_in != 0:
             if state.setpoint + state.tt_in >= 0 <= 30:
@@ -538,7 +534,7 @@ def ui_input():
                 drawlist[2] = True
             state.tt_in = 0
 
-        sleep(0.3)
+        sleep(0.06)
 
 
 # Define rotary actions depending on current mode

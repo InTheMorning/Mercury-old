@@ -5,7 +5,6 @@ import logging
 import serial
 import time
 
-
 from functools import wraps
 from logging import critical, error, info, debug
 from threading import current_thread as get_current_thread
