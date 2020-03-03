@@ -242,7 +242,7 @@ def heartbeat():
                                     ]
 
             else:
-                error("Got empty status response from serial.")
+                warning("Got empty status response from serial.")
 
             state.refetch = False
             sleep(2)

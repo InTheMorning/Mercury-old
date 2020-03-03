@@ -99,7 +99,7 @@ def draw_weather(state, lcd):
         outhumidity = str(latest_weather['humidity']) + "%"
 
     except BaseException as e:
-        warning("Got no weather information. (%s)" % e)
+        debug("Got no weather information. (%s)" % e)
         outtemp = '--' + chr(223) + "C"
         cc = "N/A"
         outhumidity = "---%"
