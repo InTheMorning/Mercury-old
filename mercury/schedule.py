@@ -9,7 +9,11 @@ from mercury.utils import logged_thread_start
 def checkschedule(state):
     ''' Todo: rewrite this so it can have a
         customizable schedule for tracking away
-        and sleeping time setpoint temperature offset.'''
+        and sleeping time setpoint temperature offset.
+
+        add interface toggle for away/boost/sleep overrides
+
+        '''
 
     # 0:MON 1:TUE 2:WED 3:THU 4:FRI 5:SAT 6:SUN
     workdays = range(0, 4)		# workdays
