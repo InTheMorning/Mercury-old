@@ -44,8 +44,8 @@ class State:
         self.setback = 0
         self.latest_weather = None
         self.stemp = False
-        self.spressure = 0
-        self.shumidity = 0
+        self.spressure = 0  # int
+        self.shumidity = 0  # in hundredths of percent
         self.blinker = True
         self.displayed_time_last_refresh = 0
         self.blinker_last_refresh = 0
@@ -55,10 +55,10 @@ class State:
         self.htrstatus = HeaterState.OFF
 
         # Defaults
-        self.setpoint = 20   # in celsius
+        self.setpoint = 2000   # in hundredths of degrees celsius
         self.sensortimeout = 300
         self.heartbeatinterval = 30
-        self.temp_tolerance = 1.8
+        self.temp_tolerance = 60  # in hundredths of degrees celsius
         self.refreshrate = 0.06 		# in seconds
         self.target_temp = self.setpoint
 
@@ -231,8 +231,8 @@ def heartbeat():
                          'Target: {target_temp:.2f}°C. '
                          '{previousstatus!r} → now is {heater_status!r}.'
                          .format(
-                                 stemp=state.stemp,
-                                 target_temp=state.target_temp,
+                                 stemp=(state.stemp / 100),
+                                 target_temp=(state.target_temp / 100),
                                  previousstatus=previousstatus.pretty_name,
                                  heater_status=state.htrstatus.pretty_name))
                     state.lhs[:] = [
@@ -280,12 +280,19 @@ def smoothsensordata(samples, refresh):
 
                 sleep(refresh / samples)
 
-            state.stemp = t / samples
-            state.spressure = p / samples
-            state.shumidity = h / samples
+            ft = t / samples
+            fp = p / samples
+            fh = h / samples
+
+            state.stemp = int(100 * ft + 0.5)
+            state.spressure = int(fp)
+            state.shumidity = int(100 * fh + 0.5)
 
             debug("Got sensor data: %s°C, %shPa, %s%%"
-                  % (stemp, spressure, shumidity))
+                  % ((state.stemp / 100),
+                     state.spressure,
+                     (state.shumidity / 100))
+                  )
             sensortime = now
 
         except BaseException:
@@ -375,8 +382,8 @@ def thermostat():
     info("Heater: %s, Temp: %s°C, Setpoint: %s°C"
          % (
             state.htrstatus.pretty_name,
-            '{0:.1f}'.format(state.stemp),
-            '{0:.1f}'.format(state.setpoint),
+            '{0:.1f}'.format(state.stemp / 100),
+            '{0:.1f}'.format(state.setpoint / 100),
             )
          )
 
@@ -386,6 +393,7 @@ def thermostat():
         seconds = tdelta.total_seconds()
         lasttime = lhs[0]
         lasttemp = lhs[2]
+
         stemp = state.stemp
         stempdelta = stemp - lasttemp
         current_htrstatus = state.htrstatus
@@ -395,10 +403,12 @@ def thermostat():
                          'since {timestamp} ({temprate:.2f}°C/hr)]'
                          .format(
                              htrstatus=current_htrstatus.pretty_name,
-                             stemp=stemp,
-                             stempdelta=stempdelta,
+                             stemp=(stemp / 100),
+                             stempdelta=(stempdelta / 100),
                              timestamp=lasttime.strftime('%H:%M:%S'),
-                             temprate=stempdelta / seconds * 3600))
+                             temprate=((stempdelta/100) / seconds * 3600)
+                                 )
+                         )
 
         # Shut off the heater if temperature reached,
         # unless the heater is already off (so we can continue to increase time
@@ -423,9 +433,12 @@ def thermostat():
                     # We have been on stage 1 for too long -> go to stage 2
                     info('Low Heat is taking too long: {0:.2f}°C '
                          'since {1} ({2} minutes ago)'
-                         .format(stemp - lasttemp,
+                         .format(
+                                 ((stemp - lasttemp) / 100),
                                  lasttime.strftime("%H:%M:%S"),
-                                 floor(seconds / 60)))
+                                 floor(seconds / 60)
+                                 )
+                         )
                     htrtoggle(HeaterState.FULL_HEAT)
 
         elif current_htrstatus == HeaterState.FULL_HEAT:
@@ -443,7 +456,7 @@ def thermostat():
             # Temperature fell under the threshold, turning on
             if stemp < state.target_temp - state.temp_tolerance:
                 info("Temperature more than %.1f°C below setpoint."
-                     % state.temp_tolerance)
+                     % (state.temp_tolerance / 100))
                 if seconds > idletime:
                     htrtoggle(HeaterState.LOW_HEAT)
                 else:
@@ -531,8 +544,9 @@ def redraw():
 
 # Define rotary actions depending on current mode
 def rotaryevent(direction):
-    delta = 0.1 * direction
-    if state.setpoint + delta >= 10 <= 20:
+    delta = 10 * direction
+
+    if 1000 <= (state.setpoint + delta) <= 4000:
         state.setpoint += delta
         state.target_temp = state.setpoint + state.setback
         tone_player(Sound.TIC)
@@ -570,7 +584,10 @@ def main(config_file, debug, verbose):
 
     state.config = load_settings(config_file)
 
-    state.setpoint = state.config.getfloat('User', 'Setpoint')
+    # Retrieve setpoint as float, clamped to valid range
+    f = min(max(state.config.getfloat('User', 'Setpoint'), 10), 40)
+    # Round and convert to int in hundredths of degrees
+    state.setpoint = int(100 * f + 0.5)
 
     try:
         serial = setup_serial()

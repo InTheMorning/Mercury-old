@@ -72,7 +72,7 @@ def draw_time(state, lcd):
 
 
 def draw_setpoint(state, lcd):
-    sp = '{0:.1f}'.format(state.setpoint) + chr(223) + "C"
+    sp = '{0:.1f}'.format(state.setpoint / 100) + chr(223) + "C"
 
     lcd.display_string(sp.center(20), 2)
 
@@ -83,10 +83,8 @@ def draw_sensor(state, lcd):
     else:
         sensortemp = state.stemp
 
-    sensorhumidity = state.shumidity
-
-    sensortemperature = '{0:.1f}'.format(sensortemp) + chr(223) + "C"
-    sensorhumidity = '{0:.0f}'.format(sensorhumidity) + "%"
+    sensortemperature = '{0:.1f}'.format(sensortemp / 100) + chr(223) + "C"
+    sensorhumidity = str(int(state.shumidity / 100 + 0.5)) + "%"
 
     lcd.display_string(sensortemperature.ljust(6), 3)
     lcd.display_string(sensorhumidity.ljust(6), 4)

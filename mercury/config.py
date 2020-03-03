@@ -48,10 +48,8 @@ def load_settings(config_file):
 
 def save_settings(config, config_file, setpoint):
     '''Save configuration data'''
-
-    setpoint_float = '{0:.2f}'.format(setpoint)
-    setpoint_to_save = str(setpoint_float)
-
+    # Convert setpoint back to float, then string
+    setpoint_to_save = str(setpoint / 100)
     config['User']['Setpoint'] = setpoint_to_save
 
     with open(config_file, 'w') as f:

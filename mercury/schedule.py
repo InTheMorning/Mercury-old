@@ -17,7 +17,9 @@ def checkschedule(state):
     customwd = range(4, 5) 		# custom workday(s)
     customwdhrs = range(6, 14)
 
-    awaytemp = -1.5
+    away_temp_mod = -200
+    boost_temp_mod = 100
+
     while state.run:
         now = datetime.now()
         weekday = now.weekday()
@@ -33,18 +35,22 @@ def checkschedule(state):
             whrs = []
             state.setback = 0
         if hour in whrs:
-            state.setback = awaytemp
+            state.setback = away_temp_mod
             debug("User is away, offsetting setpoint by %d°C."
-                  % state.setback)
+                  % (state.setback / 100)
+                  )
         elif hour + 1 in whrs:
-            state.setback = 1
+            state.setback = boost_temp_mod
             debug("User is getting ready for work,"
                   "offsetting setpoint by %d°C."
-                  % state.setback)
+                  % (state.setback / 100)
+                  )
         else:
             state.setback = 0
             debug("User is home, not offsetting setpoint.")
         state.target_temp = state.setpoint + state.setback
-        debug("Actual target temperature is %d." % state.target_temp)
+        debug("Actual target temperature is %d°C."
+              % (state.target_temp / 100)
+              )
         state.drawlist[2] = True
         sleep(300)
