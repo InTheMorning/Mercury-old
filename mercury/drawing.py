@@ -71,11 +71,10 @@ def draw_time(state, lcd):
         lcd.display_string(localtime.rjust(10), 1, 10)
 
 
-def draw_temp(state, lcd):
-    # tt = '{0:.1f}'.format(state.target_temp) + chr(223) + "C"
-    tts = '{0:.1f}'.format(state.setpoint) + chr(223) + "C"
+def draw_setpoint(state, lcd):
+    sp = '{0:.1f}'.format(state.setpoint) + chr(223) + "C"
 
-    lcd.display_string(tts.center(20), 2)
+    lcd.display_string(sp.center(20), 2)
 
 
 def draw_sensor(state, lcd):

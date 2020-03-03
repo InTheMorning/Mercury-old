@@ -33,6 +33,7 @@ def load_settings(config_file):
 
     if not config.has_section('User'):
         config.add_section('User')
+
     if not config.has_option('User', 'Setpoint'):
         config.set('User', 'Setpoint', default_setpoint)
 

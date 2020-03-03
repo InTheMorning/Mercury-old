@@ -41,9 +41,7 @@ class State:
     def __init__(self):
         self.bme280 = bme280.Bme280(1)
 
-        self.tt_in = 0
         self.setback = 0
-        self.forecast_day = 0
         self.latest_weather = None
         self.stemp = False
         self.spressure = 0
@@ -292,7 +290,7 @@ def smoothsensordata(samples, refresh):
 
         except BaseException:
             warning("Sensor failure")
-            if (now - sensortime).total_seconds() >= state.sensortimeout:
+            if (now - sensortime) >= state.sensortimeout:
                 error("Timed out waiting for sensor data -- exiting!")
                 state.run = False
         finally:
@@ -405,7 +403,7 @@ def thermostat():
         # Shut off the heater if temperature reached,
         # unless the heater is already off (so we can continue to increase time
         # delta counter to check timeouts)
-        if (stemp >= state.target_temp + (state.temp_tolerance / 3)
+        if (stemp >= state.target_temp + (state.temp_tolerance)
                 and current_htrstatus
                 not in [HeaterState.OFF,
                         HeaterState.FAN_ONLY]):
@@ -488,9 +486,9 @@ def drawstatus(element):
     elif element == 1:
         try_draw(drawing.draw_time)
 
-    # 2 - Temperature setting
+    # 2 - Setpoint Temperature
     elif element == 2:
-        try_draw(drawing.draw_temp)
+        try_draw(drawing.draw_setpoint)
 
     # 3 - Sensor data
     elif element == 3:
