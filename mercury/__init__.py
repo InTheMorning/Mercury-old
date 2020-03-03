@@ -371,12 +371,16 @@ def thermostat():
 
     threads['schedule'].start()
     threads['weather'].start()
-    threads['ui_input'].start()
 
     sleep(3)
 
-    info("Heater: %s, Temp: %s°C" % (state.htrstatus.pretty_name,
-                                     '{0:.1f}'.format(state.stemp)))
+    info("Heater: %s, Temp: %s°C, Setpoint: %s°C"
+         % (
+            state.htrstatus.pretty_name,
+            '{0:.1f}'.format(state.stemp),
+            '{0:.1f}'.format(state.setpoint),
+            )
+         )
 
     while state.run:
         now = datetime.now()
@@ -527,30 +531,16 @@ def redraw():
         sleep(state.refreshrate)
 
 
-@logged_thread_start
-def ui_input():
-    drawlist = state.drawlist
-    while True:
-        if state.tt_in != 0:
-            if state.setpoint + state.tt_in >= 0 <= 30:
-                state.setpoint += state.tt_in
-                state.target_temp = state.setpoint + state.setback
-                drawlist[2] = True
-            state.tt_in = 0
-
-        sleep(0.06)
-
-
 # Define rotary actions depending on current mode
 def rotaryevent(direction):
-
-    if direction == 1:
-        state.tt_in += 0.1
+    delta = 0.1 * direction
+    if state.setpoint + delta >= 10 <= 20:
+        state.setpoint += delta
+        state.target_temp = state.setpoint + state.setback
         tone_player(Sound.TIC)
-    elif direction == -1:
-        state.tt_in -= 0.1
-        tone_player(Sound.TIC)
-    sleep(0.01)
+        state.drawlist[2] = True
+    else:
+        tone_player(Sound.BONK)
 
 
 @click.command()
@@ -610,7 +600,6 @@ def main(config_file, debug, verbose):
         "sensor": Thread(name='sensor', target=smoothsensordata,
                          args=(5, 30)),  # (no. of samples, period time)
         "thermostat": Thread(name='thermostat', target=thermostat),
-        "ui_input": Thread(name='ui_input', target=ui_input),
         "display": Thread(name='display', target=redraw),
         "weather": Thread(name='weather', target=getweather),
     }
