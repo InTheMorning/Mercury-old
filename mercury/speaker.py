@@ -40,8 +40,8 @@ def tone_player(tone):
 
     if tone == Sound.TIC:
         p.ChangeFrequency(50)
-        p.ChangeDutyCycle(100)
-        sleep(0.01)
+        p.ChangeDutyCycle(25)
+        sleep(0.05)
 
     elif tone == Sound.BEEP:
         p.ChangeFrequency(880)

@@ -85,7 +85,7 @@ class HeaterState(Enum):
     def pretty_name(self):
         _pretty_names = {
             HeaterState.OFF: 'OFF',
-            HeaterState.FAN_ONLY: 'FAN only',
+            HeaterState.FAN_ONLY: 'Fan only',
             HeaterState.LOW_HEAT: 'Low Heat',
             HeaterState.FULL_HEAT: 'Full Heat',
         }
@@ -544,7 +544,7 @@ def redraw():
 
 # Define rotary actions depending on current mode
 def rotaryevent(direction):
-    delta = 10 * direction
+    delta = 50 * direction
 
     if 1000 <= (state.setpoint + delta) <= 4000:
         state.setpoint += delta
