@@ -2,11 +2,17 @@
 
 const long BITS_PER_SECOND = 9600;
 
-int ST2Relay = 4;
-int ST1Relay = 3;
-int FANRelay = 2;
-unsigned long timeout = 3600000;
-unsigned long cooldown = 60000; // fan cooldown after heating
+int ST2Relay = 2;
+int ST1Relay = 4;
+int FANRelay = 5;
+
+int red_light_pin= 9;
+int green_light_pin = 10;
+int blue_light_pin = 11;
+
+int led_brightness = 255; // max is 255
+unsigned long thermostat_timeout = 3600000;
+unsigned long cooldown = 3600; // fan cooldown after heating
 unsigned long previousFanTime = millis();
 unsigned long currentMillis = millis();
 unsigned long LastMessage = millis();
@@ -17,10 +23,15 @@ char incomingByte;
 
 void setup()
 {
+	pinMode(13, OUTPUT);
 	pinMode(ST2Relay, OUTPUT);
 	pinMode(ST1Relay, OUTPUT);
 	pinMode(FANRelay, OUTPUT);
+	pinMode(red_light_pin, OUTPUT);
+	pinMode(green_light_pin, OUTPUT);
+	pinMode(blue_light_pin, OUTPUT);
 
+	digitalWrite(13, LOW);
 	digitalWrite(ST2Relay, HIGH);
 	digitalWrite(ST1Relay, HIGH);
 	digitalWrite(FANRelay, HIGH);
@@ -30,33 +41,47 @@ void setup()
 	delay(500);
 }
 
+void RGB_color(int red_light_value, int green_light_value, int blue_light_value)
+{
+	float red = ((red_light_value / 255.0) * led_brightness) + 0.9999;
+	float green = ((green_light_value / 255.0) * led_brightness) + 0.9999;
+	float blue = ((blue_light_value / 255.0) * led_brightness) + 0.9999;
+
+	analogWrite(red_light_pin, (int) red);
+	analogWrite(green_light_pin, (int) green);
+	analogWrite(blue_light_pin, (int) blue);
+}
+
 int hvacmode(int n)
 {
 	
 	int newstate = 0;
 	
-	if (n==3)
+	if (n==3) // state 3: full heat
 	{
 		digitalWrite(ST2Relay, LOW);
 		digitalWrite(ST1Relay, LOW);
 		digitalWrite(FANRelay, HIGH);
+		RGB_color(255,0,0);
 		newstate = 3;
 	}
 
-	else if (n==2)
+	else if (n==2) // state 2: low heat
 	{
 		digitalWrite(ST2Relay, HIGH);
 		digitalWrite(ST1Relay, LOW);
 		digitalWrite(FANRelay, HIGH);
+		RGB_color(255,80,0);
 		newstate = 2;
 	}
 
-	else if (n==1)
+	else if (n==1) // state 1: fan only
 	{
 		digitalWrite(ST2Relay, HIGH);
 		digitalWrite(ST1Relay, HIGH);
 		digitalWrite(FANRelay, LOW);
-		previousFanTime = millis();
+		RGB_color(0,255,0);
+		previousFanTime = (unsigned long) millis();
 		newstate = 1;
 	}
 
@@ -65,7 +90,8 @@ int hvacmode(int n)
 		digitalWrite(ST2Relay, HIGH);
 		digitalWrite(ST1Relay, HIGH);
 		digitalWrite(FANRelay, LOW);
-		previousFanTime = millis();
+		RGB_color(0,255,0);
+		previousFanTime = (unsigned long) millis();
 		newstate = 1;
 	}
 
@@ -74,6 +100,7 @@ int hvacmode(int n)
 		digitalWrite(ST2Relay, HIGH);
 		digitalWrite(ST1Relay, HIGH);
 		digitalWrite(FANRelay, HIGH);
+		RGB_color(2,2,3);
 		newstate = 0;
 	}
 
@@ -88,7 +115,7 @@ int hvacmode(int n)
 
 void loop()
 {
-	currentMillis = millis();
+	currentMillis = (unsigned long) millis();
 
 	if (Serial.available() > 0)
 	{
@@ -109,23 +136,24 @@ void loop()
 
 		if (integerValue == 9)
 		{
+			delay(50);
 			Serial.println(currentstate);  // report current state
 		}
 		else
 		{
 			currentstate = hvacmode(integerValue);
 		}
-
+ 
 		delay(10);
 	}
 	if (currentstate == 1
-	    && (((unsigned long)(currentMillis - previousFanTime)) >= cooldown))
+	    && ((currentMillis - previousFanTime) >= cooldown))
 	{
 		currentstate = 0;
 		currentstate = hvacmode(0);
 	}
 
-	else if (currentstate > 1 && (((unsigned long)(currentMillis - LastMessage)) >= timeout))
+	else if (currentstate > 1 && ((currentMillis - LastMessage) >= thermostat_timeout))
 	{
 		currentstate = hvacmode(0);
 	}
