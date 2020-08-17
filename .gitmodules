@@ -1,9 +1,3 @@
 [submodule "lib/python-bme280"]
 	path = lib/python-bme280
 	url = https://github.com/InTheMorning/python-bme280
-[submodule "arduino-opentherm"]
-	path = arduino-opentherm
-	url = https://github.com/jpraus/arduino-opentherm.git
-[submodule "lib/arduino-opentherm"]
-	path = lib/arduino-opentherm
-	url = https://github.com/jpraus/arduino-opentherm.git
