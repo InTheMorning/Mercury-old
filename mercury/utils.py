@@ -32,7 +32,7 @@ def setup_logging(**kwargs):
     logging.basicConfig(**kwargs)
 
 
-def setup_serial(device='/dev/ttyUSB0', baudrate=9600):
+def setup_serial(device='/dev/AMA0', baudrate=9600:
     debug("Getting heater serial connection...")
 
     try:

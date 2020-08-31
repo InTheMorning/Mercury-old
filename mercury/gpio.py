@@ -5,16 +5,15 @@ import atexit
 
 from logging import critical, info, debug
 
-ROTARY_A = 11
-ROTARY_B = 7
-BUTTON = 13
+ROTARY_CLK = 7
+ROTARY_DT = 11
+ROTARY_SW = 13
 SPEAKER = 12
 
 GPIO_DEFAULT_INPUTS = {
-    'RotaryA': ROTARY_A,
-    'RotaryB': ROTARY_B,
-    'Button': BUTTON,
-    # 'Reset', 22,
+    'RotaryCLK': ROTARY_CLK,
+    'RotaryDT': ROTARY_DT,
+    'RotarySW': ROTARY_SW,
 }
 
 GPIO_DEFAULT_OUTPUTS = {

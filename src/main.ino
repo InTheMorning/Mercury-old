@@ -46,13 +46,12 @@ void led_control(int r, int g, int b)
 	static unsigned int Phase; // phase of waveform in degrees
 	static unsigned long Timestamp;
 	
-	float rv, gv, bv;
 	float brightness_multiplier;
 	
 	// if any values are negative, just step the brightness
 	if (r < 0 || g < 0 || b < 0) 
 	{
-		if (millis() - Timestamp >= 5)
+		if (millis() - Timestamp >= 15)
 		{
 			// wrap around phase
 			if (Phase >= 360)
@@ -65,18 +64,19 @@ void led_control(int r, int g, int b)
 			// brightness_multiplier = Phase;
 			
 			// modify the brightness
-			Brightness = (unsigned long) (brightness_multiplier * led_max_brightness) + 0.5;
-			
-			// compute the new r,g,b values
-			rv = (Red / 255.0 * Brightness) + 0.5;
-			gv = (Green / 255.0 * Brightness) + 0.5;
-			bv = (Blue / 255.0 * Brightness) + 0.5;
+			Brightness = (unsigned char) (brightness_multiplier * led_max_brightness) + 0.5;
+
+			// Avoid blackout
+			if (Brightness < 5)
+			{
+				Brightness = 5;
+			}
 			
 			// increment the phase
-			Phase += 1;
+			Phase += 5;
 			Timestamp = millis();
 			
-			led_write((unsigned char) rv, (unsigned char) gv, (unsigned char) bv);
+			led_write(Red, Green, Blue, Brightness);
 		}
 	}
 	
@@ -90,15 +90,20 @@ void led_control(int r, int g, int b)
 		Red = (unsigned char) r;
 		Green = (unsigned char) g;
 		Blue = (unsigned char) b;
-		led_write(Red, Green, Blue);
+		led_write(Red, Green, Blue, Brightness);
 	}
 }
 
-void led_write(unsigned char r, unsigned char g, unsigned char b)
-{	// write to led
-	analogWrite(red_light_pin, r);
-	analogWrite(green_light_pin, g);
-	analogWrite(blue_light_pin, b);
+void led_write(unsigned char r, unsigned char g, unsigned char b, unsigned char brightness)
+{
+	// compute the new r,g,b values
+	float rv = (r / 255.0 * brightness) + 0.5;
+	float gv = (g / 255.0 * brightness) + 0.5;
+	float bv = (b / 255.0 * brightness) + 0.5;
+	// write to led
+	analogWrite(red_light_pin, (unsigned char) rv);
+	analogWrite(green_light_pin, (unsigned char) gv);
+	analogWrite(blue_light_pin, (unsigned char) bv);
 }
 
 int int_from_serial()
