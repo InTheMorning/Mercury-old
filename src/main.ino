@@ -2,28 +2,27 @@
 
 const long BITS_PER_SECOND = 9600;
 
-const int stage_2_relay = 2;
-const int stage_1_relay_pin = 4;
-const int fan_relay_pin = 5;
-const int red_light_pin= 9;
-const int green_light_pin = 10;
-const int blue_light_pin = 11;
+const unsigned char stage_2_relay = 2;
+const unsigned char stage_1_relay_pin = 4;
+const unsigned char fan_relay_pin = 5;
+const unsigned char red_light_pin= 9;
+const unsigned char green_light_pin = 10;
+const unsigned char blue_light_pin = 11;
 
-// in milliseconds
 const unsigned long serial_timeout = 1000;
 const unsigned long thermostat_timeout = 600000;
 const unsigned long warmup_timeout = 300000; // heater warmup before full heat
 const unsigned long cooldown_timeout = 300000; // fan cooldown after heating
 int led_brightness = 128; // max is 255
-
-const int debounce = 500; // minimum time between state changes
+const int debounce = 500; //time between state changes
+const unsigned char led_max_brightness = 128; // max is 255
 
 // actual state of the heater relays
 int current_relay_state = -1;
 
 // operating state of the controller
 int current_mode = 0;
-int target_mode = -1;
+int target_mode = -1; // used when in a temporary mode
 
 char *status_strings[] = 
 	{
@@ -39,44 +38,84 @@ unsigned long message_timestamp = 0;
 unsigned long state_change_timestamp = 0;
 unsigned long start_warmup_timestamp = 0;
 unsigned long start_cooldown_timestamp = 0;
-
-void reset_timestamp(unsigned long *timeStamp)
+\
+void led_control(int r, int g, int b)
 {
-	*timeStamp = millis();
+	static unsigned char Red, Green, Blue; // current color
+	static unsigned char Brightness; // current brightness
+	static unsigned int Phase; // phase of waveform in degrees
+	static unsigned long Timestamp;
+	
+	float rv, gv, bv;
+	float brightness_multiplier;
+	
+	// if any values are negative, just step the brightness
+	if (r < 0 || g < 0 || b < 0) 
+	{
+		if (millis() - Timestamp >= 5)
+		{
+			// wrap around phase
+			if (Phase >= 360)
+			{
+				Phase = 0;
+			}
+
+			// obtain multiplier from wave function
+			float brightness_multiplier = ((1 + cos(Phase * 3.141592 / 180.0)) / 2.0);
+			// brightness_multiplier = Phase;
+			
+			// modify the brightness
+			Brightness = (unsigned long) (brightness_multiplier * led_max_brightness) + 0.5;
+			
+			// compute the new r,g,b values
+			rv = (Red / 255.0 * Brightness) + 0.5;
+			gv = (Green / 255.0 * Brightness) + 0.5;
+			bv = (Blue / 255.0 * Brightness) + 0.5;
+			
+			// increment the phase
+			Phase += 1;
+			Timestamp = millis();
+			
+			led_write((unsigned char) rv, (unsigned char) gv, (unsigned char) bv);
+		}
+	}
+	
+	else
+	{
+		// reset the phase and brightness
+		Phase = 0;
+		Brightness = led_max_brightness;
+		
+		// save provided color values
+		Red = (unsigned char) r;
+		Green = (unsigned char) g;
+		Blue = (unsigned char) b;
+		led_write(Red, Green, Blue);
+	}
 }
 
-void rgb_color(int redValue, int greenValue, int blueValue)
-{
-	float Red = ((redValue / 255.0) * led_brightness) + 0.9999;
-	float Green = ((greenValue / 255.0) * led_brightness) + 0.9999;
-	float Blue = ((blueValue / 255.0) * led_brightness) + 0.9999;
-
-	analogWrite(red_light_pin, (int) Red);
-	analogWrite(green_light_pin, (int) Green);
-	analogWrite(blue_light_pin, (int) Blue);
+void led_write(unsigned char r, unsigned char g, unsigned char b)
+{	// write to led
+	analogWrite(red_light_pin, r);
+	analogWrite(green_light_pin, g);
+	analogWrite(blue_light_pin, b);
 }
 
 int int_from_serial()
 // returns an int from serial
 {
 		char integerValue = 0;      // throw away previous integerValue
-        unsigned long serialTimestamp = millis();
+        unsigned long serialTime = millis();
+		
+		// force into a loop until 'n' is received
 		while(1)
-        // force into a loop until 'n' is received or serial_timeout expires
 		{
-            if (millis() - serialTimestamp < serial_timeout)
-            {
-                char incomingByte = Serial.read();
-                if (incomingByte == '\n') break;   // exit the while(1), we're done receiving
-                if (incomingByte == -1) continue;  // if no characters are in the buffer read() returns -1
-                integerValue *= 10;  // shift left 1 decimal place
-                // convert ASCII to integer, add, and shift left 1 decimal place
-                integerValue = ((incomingByte - 48) + integerValue);
-            }
-            else
-            {
-                return -1;
-            }            
+			char incomingByte = Serial.read();
+			if (incomingByte == '\n') break;   // exit the while(1), we're done receiving
+			if (incomingByte == -1) continue;  // if no characters are in the buffer read() returns -1
+			integerValue *= 10;  // shift left 1 decimal place
+			// convert ASCII to integer, add, and shift left 1 decimal place
+			integerValue = ((incomingByte - 48) + integerValue);
 		}
         return integerValue;
 }
@@ -96,7 +135,7 @@ void set_hvac_state(int n)
 		digitalWrite(stage_2_relay, LOW);
 		digitalWrite(stage_1_relay_pin, LOW);
 		digitalWrite(fan_relay_pin, HIGH);
-		rgb_color(255,0,0);
+		led_control(255,0,0);
         current_relay_state = 3;
 	}
 
@@ -106,7 +145,7 @@ void set_hvac_state(int n)
 		digitalWrite(stage_2_relay, HIGH);
 		digitalWrite(stage_1_relay_pin, LOW);
 		digitalWrite(fan_relay_pin, HIGH);
-		rgb_color(255,80,0);
+		led_control(255,80,0);
 		current_relay_state = 2;
 	}
 
@@ -116,7 +155,7 @@ void set_hvac_state(int n)
 		digitalWrite(stage_2_relay, HIGH);
 		digitalWrite(stage_1_relay_pin, HIGH);
 		digitalWrite(fan_relay_pin, LOW);
-		rgb_color(0,255,0);
+		led_control(0,255,0);
 		current_relay_state = 1;
 	}
 
@@ -126,18 +165,18 @@ void set_hvac_state(int n)
 		digitalWrite(stage_2_relay, HIGH);
 		digitalWrite(stage_1_relay_pin, HIGH);
 		digitalWrite(fan_relay_pin, HIGH);
-		rgb_color(2,2,3);
+		led_control(8,8,12);
 		current_relay_state = 0;
 	}
     else
     {
         return;
     }
-	reset_timestamp(&state_change_timestamp);
+	state_change_timestamp = millis();
 	delay(debounce);
 }
 
-void receive_hvac_command(int n)
+void command_hvac(int n)
 // handle incoming request
 {
     if (current_mode == 0 || current_mode == 1)
@@ -154,7 +193,7 @@ void receive_hvac_command(int n)
 		else if (n == 2 || n == 3)
 		{
 			// require warmup
-			reset_timestamp(&start_warmup_timestamp);
+			start_warmup_timestamp = millis();
 			set_hvac_state(2);
 			current_mode = 4;
 			target_mode = n;
@@ -165,7 +204,7 @@ void receive_hvac_command(int n)
 		if (n == 0 || n == 1)
 		{
 			// require cooldown
-			reset_timestamp(&start_cooldown_timestamp);
+			start_cooldown_timestamp = millis();
 			set_hvac_state(1);
 			current_mode = 5;
 			target_mode = n;
@@ -203,11 +242,13 @@ void receive_hvac_command(int n)
 
 void emergency_mode_loop()
 {
-	receive_hvac_command(0);
+	led_control(-1, -1, -1);
+	command_hvac(0);
 }
 
 void warmup_mode_loop(int t)
 {
+	led_control(-1, -1, -1);
 	// check if we should exit this mode
 	if (millis() - start_warmup_timestamp > warmup_timeout)
 	{
@@ -218,6 +259,7 @@ void warmup_mode_loop(int t)
 
 void cooldown_mode_loop(int t)
 {
+	led_control(-1, -1, -1);
 	// check if we should exit this mode
 	if (millis() - start_cooldown_timestamp > cooldown_timeout)
 	{
@@ -254,10 +296,10 @@ void monitor_serial()
 
         else
 		{
-			receive_hvac_command(serialRequest);
+			command_hvac(serialRequest);
 		}
         
-        reset_timestamp(&message_timestamp);
+        message_timestamp = millis();
     }
 }
 
@@ -279,11 +321,11 @@ void setup()
 	// turn everything off
     digitalWrite(13, LOW);
     set_hvac_state(0);
-    
+	  
 	//start serial connection
     Serial.begin(BITS_PER_SECOND);
     
-    reset_timestamp(&message_timestamp);
+    message_timestamp = millis();
 }
 
 void loop()
