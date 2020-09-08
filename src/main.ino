@@ -126,12 +126,7 @@ int set_hvac_state(int n)
 {
 	static int current_relay_state;
 	
-	if (n == current_relay_state)
-	{
-		// do nothing
-		return current_relay_state;
-	}
-	else if (n == 4)
+	if (n == 4)
 	{
 		// state 4: prepare full heat
 		digitalWrite(fan_relay_pin, HIGH);
@@ -187,7 +182,6 @@ int set_hvac_state(int n)
 	// state changed
 	current_relay_state = n;
 	state_change_timestamp = millis();
-	delay(10);
 	return current_relay_state;
 }
 
@@ -360,11 +354,7 @@ void setup()
 
 	// turn everything off
     digitalWrite(13, LOW);
-	digitalWrite(fan_relay_pin, HIGH);
-	digitalWrite(fan_speed_relay_pin, HIGH);
-	digitalWrite(stage_1_relay_pin, HIGH);
-	digitalWrite(stage_2_relay_pin, HIGH);
-	led_control(8,8,12);
+	allow_toggle(0);
 	  
 	//start serial connection
     Serial.begin(BITS_PER_SECOND);
