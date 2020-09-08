@@ -10,9 +10,9 @@ const unsigned char red_light_pin = 9;
 const unsigned char green_light_pin = 10;
 const unsigned char blue_light_pin = 11;
 
-const unsigned long thermostat_timeout = (15 * 60 * 1000); // emergency mode trigger
-const unsigned long warmup_timeout = (5 * 60 * 1000); // warmup before full heat
-const unsigned long cooldown_timeout = (2 * 60 * 1000); // fan cooldown after heating
+const unsigned long thermostat_timeout = (60000 * 15); // emergency mode trigger
+const unsigned long warmup_timeout = (60000 * 5); // warmup before full heat
+const unsigned long cooldown_timeout = (1000 * 90); // fan cooldown after heating
 const unsigned char led_max_brightness = 196; // max is 255
 
 
@@ -187,57 +187,43 @@ int set_hvac_state(int n)
 	// state changed
 	current_relay_state = n;
 	state_change_timestamp = millis();
+	delay(10);
 	return current_relay_state;
 }
+
 
 void command_hvac(int n)
 // handle incoming request
 {
-	int cm = set_hvac_state(-1);
-
-    if (current_mode == 0 || current_mode == 1)
+	if (current_mode == 0 || current_mode == 1)
 	{
 		if (n == 0 || n == 1)
 		{
 			// allow toggle fan on/off
 			if (current_mode != n)
 			{
-				set_hvac_state(n);
-				current_mode = n;
+				allow_toggle(n);
 			}
 		}
 		else if (n == 2 || n == 3)
 		{
-			// require warmup
-			start_warmup_timestamp = millis();
-			set_hvac_state(2);
-			current_mode = 4;
-			target_mode = n;
+			require_warmup(2, n);
 		}
 	}
 	else if (current_mode == 2 || current_mode == 3)
 	{
 		if (n == 0 || n == 1)
 		{
-			// require cooldown
-			start_cooldown_timestamp = millis();
-			set_hvac_state(1);
-			current_mode = 5;
-			target_mode = n;
+			require_cooldown(n);
 		}
 		else if (n == 2 && current_mode != n)
 		{
 			// allow toggle if different
-			set_hvac_state(n);
-			current_mode = n;
+			allow_toggle(n);
 		}
 		else if (n == 3 && current_mode != n)
 		{
-			// require secondary warmup
-			start_warmup_timestamp = millis();
-			set_hvac_state(4);
-			current_mode = 4;
-			target_mode = n;
+			require_warmup(4, n);
 		}
 	}
 	else if (current_mode == 4)
@@ -245,37 +231,40 @@ void command_hvac(int n)
 		if (n == 2)
 		{
 			// cancel warmup
-			set_hvac_state(n);
-			current_mode = n;
-		}
-		else if (n == 3)
-		{
-			if (cm == 4)
-			{
-				// toggle full heat
-				set_hvac_state(n);
-				current_mode = n;
-			}
-			else
-			{
-				// require secondary warmup
-				start_warmup_timestamp = millis();
-				set_hvac_state(4);
-				current_mode = 4;
-				target_mode = n;
-			}
+			allow_toggle(n);
 		}
 	}
-	
 	else if (current_mode == 5)
 	{
 		if (n == 2)
 		{
 			// cancel cooldown
-			set_hvac_state(n);
-			current_mode = n;
+			allow_toggle(n);
 		}
 	}
+}
+
+void require_warmup(int newstate, int t)
+{
+	start_warmup_timestamp = millis();
+	set_hvac_state(newstate);
+	current_mode = 4;
+	target_mode = t;
+}
+	
+void require_cooldown(int t)
+{
+	// require cooldown
+	start_cooldown_timestamp = millis();
+	set_hvac_state(1);
+	current_mode = 5;
+	target_mode = t;
+}
+
+void allow_toggle(int t)
+{
+	set_hvac_state(t);
+	current_mode = t;
 }
 
 void emergency_mode_loop()
@@ -292,7 +281,16 @@ void warmup_mode_loop(int t)
 	// check if we should exit this mode
 	if (millis() - start_warmup_timestamp > warmup_timeout)
 	{
-		command_hvac(t);
+		int cm = set_hvac_state(-1);
+		
+		if (cm >= t)
+		{
+			allow_toggle(t);
+		}
+		else
+		{
+			require_warmup(4, t);
+		}
 	}
 }
 
