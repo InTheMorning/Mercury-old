@@ -2,23 +2,19 @@
 
 const long BITS_PER_SECOND = 9600;
 
-const unsigned char stage_2_relay = 2;
+const unsigned char fan_relay_pin = 2;
+const unsigned char fan_speed_relay_pin = 3;
 const unsigned char stage_1_relay_pin = 4;
-const unsigned char fan_relay_pin = 5;
-const unsigned char red_light_pin= 9;
+const unsigned char stage_2_relay_pin = 5;
+const unsigned char red_light_pin = 9;
 const unsigned char green_light_pin = 10;
 const unsigned char blue_light_pin = 11;
 
-const unsigned long serial_timeout = 1000;
-const unsigned long thermostat_timeout = 600000;
-const unsigned long warmup_timeout = 300000; // heater warmup before full heat
-const unsigned long cooldown_timeout = 300000; // fan cooldown after heating
-int led_brightness = 128; // max is 255
-const int debounce = 500; //time between state changes
-const unsigned char led_max_brightness = 128; // max is 255
+const unsigned long thermostat_timeout = (15 * 60 * 1000); // emergency mode trigger
+const unsigned long warmup_timeout = (5 * 60 * 1000); // warmup before full heat
+const unsigned long cooldown_timeout = (2 * 60 * 1000); // fan cooldown after heating
+const unsigned char led_max_brightness = 196; // max is 255
 
-// actual state of the heater relays
-int current_relay_state = -1;
 
 // operating state of the controller
 int current_mode = 0;
@@ -67,9 +63,9 @@ void led_control(int r, int g, int b)
 			Brightness = (unsigned char) (brightness_multiplier * led_max_brightness) + 0.5;
 
 			// Avoid blackout
-			if (Brightness < 5)
+			if (Brightness < 1)
 			{
-				Brightness = 5;
+				Brightness = 1;
 			}
 			
 			// increment the phase
@@ -125,70 +121,85 @@ int int_from_serial()
         return integerValue;
 }
 
-void set_hvac_state(int n)
-// relay and led definitions for hvac states
+int set_hvac_state(int n)
+// relay and led definitions for hvac heating states
 {
-	if (n == current_relay_state)
-	// do nothing
-	{
-		return;
-	}
+	static int current_relay_state;
 	
-    else if (n == 3)
-	// state 3: full heat
+	if (n == current_relay_state)
 	{
-		digitalWrite(stage_2_relay, LOW);
-		digitalWrite(stage_1_relay_pin, LOW);
+		// do nothing
+		return current_relay_state;
+	}
+	else if (n == 4)
+	{
+		// state 4: prepare full heat
 		digitalWrite(fan_relay_pin, HIGH);
+		digitalWrite(fan_speed_relay_pin, HIGH);
+		digitalWrite(stage_1_relay_pin, LOW);
+		digitalWrite(stage_2_relay_pin, LOW);
+		led_control(255,20,0);
+	}
+    else if (n == 3)
+	{
+		// state 3: full heat
+		digitalWrite(fan_relay_pin, HIGH);
+		digitalWrite(fan_speed_relay_pin, LOW);
+		digitalWrite(stage_1_relay_pin, LOW);
+		digitalWrite(stage_2_relay_pin, LOW);
 		led_control(255,0,0);
-        current_relay_state = 3;
 	}
 
 	else if (n == 2)
-	// state 2: low heat
 	{
-		digitalWrite(stage_2_relay, HIGH);
-		digitalWrite(stage_1_relay_pin, LOW);
+		// state 2: low heat
 		digitalWrite(fan_relay_pin, HIGH);
+		digitalWrite(fan_speed_relay_pin, HIGH);
+		digitalWrite(stage_1_relay_pin, LOW);
+		digitalWrite(stage_2_relay_pin, HIGH);
 		led_control(255,80,0);
-		current_relay_state = 2;
 	}
 
 	else if (n == 1)
-	// state 1: fan only
 	{
-		digitalWrite(stage_2_relay, HIGH);
-		digitalWrite(stage_1_relay_pin, HIGH);
+		// state 1: fan only
 		digitalWrite(fan_relay_pin, LOW);
+		digitalWrite(fan_speed_relay_pin, HIGH);
+		digitalWrite(stage_1_relay_pin, HIGH);
+		digitalWrite(stage_2_relay_pin, HIGH);
 		led_control(0,255,0);
-		current_relay_state = 1;
 	}
 
 	else if (n == 0)
 	// state 0: off
 	{
-		digitalWrite(stage_2_relay, HIGH);
-		digitalWrite(stage_1_relay_pin, HIGH);
 		digitalWrite(fan_relay_pin, HIGH);
+		digitalWrite(fan_speed_relay_pin, HIGH);
+		digitalWrite(stage_1_relay_pin, HIGH);
+		digitalWrite(stage_2_relay_pin, HIGH);
 		led_control(8,8,12);
-		current_relay_state = 0;
 	}
     else
     {
-        return;
+		// invalid, no state change
+        return current_relay_state;
     }
+	// state changed
+	current_relay_state = n;
 	state_change_timestamp = millis();
-	delay(debounce);
+	return current_relay_state;
 }
 
 void command_hvac(int n)
 // handle incoming request
 {
+	int cm = set_hvac_state(-1);
+
     if (current_mode == 0 || current_mode == 1)
 	{
 		if (n == 0 || n == 1)
 		{
-			// allow toggle if different
+			// allow toggle fan on/off
 			if (current_mode != n)
 			{
 				set_hvac_state(n);
@@ -214,14 +225,19 @@ void command_hvac(int n)
 			current_mode = 5;
 			target_mode = n;
 		}
-		else if (n == 2 || n == 3)
+		else if (n == 2 && current_mode != n)
 		{
 			// allow toggle if different
-			if (current_mode != n)
-			{
-				set_hvac_state(n);
-				current_mode = n;
-			}
+			set_hvac_state(n);
+			current_mode = n;
+		}
+		else if (n == 3 && current_mode != n)
+		{
+			// require secondary warmup
+			start_warmup_timestamp = millis();
+			set_hvac_state(4);
+			current_mode = 4;
+			target_mode = n;
 		}
 	}
 	else if (current_mode == 4)
@@ -231,6 +247,23 @@ void command_hvac(int n)
 			// cancel warmup
 			set_hvac_state(n);
 			current_mode = n;
+		}
+		else if (n == 3)
+		{
+			if (cm == 4)
+			{
+				// toggle full heat
+				set_hvac_state(n);
+				current_mode = n;
+			}
+			else
+			{
+				// require secondary warmup
+				start_warmup_timestamp = millis();
+				set_hvac_state(4);
+				current_mode = 4;
+				target_mode = n;
+			}
 		}
 	}
 	
@@ -253,23 +286,26 @@ void emergency_mode_loop()
 
 void warmup_mode_loop(int t)
 {
+	// flash the led
 	led_control(-1, -1, -1);
+
 	// check if we should exit this mode
 	if (millis() - start_warmup_timestamp > warmup_timeout)
 	{
-		set_hvac_state(t);
-		current_mode = t;
+		command_hvac(t);
 	}
 }
 
 void cooldown_mode_loop(int t)
 {
+	// flash the led
 	led_control(-1, -1, -1);
+
 	// check if we should exit this mode
 	if (millis() - start_cooldown_timestamp > cooldown_timeout)
 	{
-		set_hvac_state(t);
-		current_mode = t;
+		current_mode = 1;
+		command_hvac(t);
 	}
 }
 
@@ -290,7 +326,7 @@ void monitor_serial()
 		{
         	// special code to retrieve heater state via serial
 			delay(50);
-			Serial.println(current_relay_state);
+			Serial.println(set_hvac_state(-1));
 		}
         
         else if (serialRequest < 0 || serialRequest > 3)
@@ -314,10 +350,11 @@ void setup()
 	pinMode(13, OUTPUT);
     
     // relays
-	pinMode(stage_2_relay, OUTPUT);
+	pinMode(stage_2_relay_pin, OUTPUT);
 	pinMode(stage_1_relay_pin, OUTPUT);
 	pinMode(fan_relay_pin, OUTPUT);
-    
+    pinMode(fan_speed_relay_pin, OUTPUT);
+	
     // color led
 	pinMode(red_light_pin, OUTPUT);
 	pinMode(green_light_pin, OUTPUT);
@@ -325,7 +362,11 @@ void setup()
 
 	// turn everything off
     digitalWrite(13, LOW);
-    set_hvac_state(0);
+	digitalWrite(fan_relay_pin, HIGH);
+	digitalWrite(fan_speed_relay_pin, HIGH);
+	digitalWrite(stage_1_relay_pin, HIGH);
+	digitalWrite(stage_2_relay_pin, HIGH);
+	led_control(8,8,12);
 	  
 	//start serial connection
     Serial.begin(BITS_PER_SECOND);
@@ -344,6 +385,7 @@ void loop()
 	}
 	
 	// also check if we are in transition
+	
 	if (current_mode == 4)
 	// warming up
 	{
