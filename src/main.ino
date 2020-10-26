@@ -1,16 +1,14 @@
 #include <Arduino.h>
 #define relayON LOW
 #define relayOFF HIGH
-
-const long BITS_PER_SECOND = 9600;
-
-const unsigned char fan_relay_pin = 2;
-const unsigned char fan_speed_relay_pin = 3;
-const unsigned char stage_1_relay_pin = 4;
-const unsigned char stage_2_relay_pin = 7;
-const unsigned char red_light_pin = 9;
-const unsigned char green_light_pin = 10;
-const unsigned char blue_light_pin = 11;
+#define BITS_PER_SECOND 9600
+#define fan_relay_pin 2
+#define fan_speed_relay_pin 3
+#define stage_1_relay_pin 4
+#define stage_2_relay_pin 7
+#define red_light_pin 9
+#define green_light_pin 10
+#define blue_light_pin 11
 
 const unsigned long thermostat_timeout = (60000 * 15); // emergency mode trigger (minutes)
 const unsigned long warmup_timeout = (1000 * 30); // warmup before full heat (seconds)
