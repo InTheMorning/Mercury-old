@@ -82,10 +82,12 @@ void led_control(int r, int g, int b)
 		Phase = 0;
 		Brightness = led_max_brightness;
 		
-		// save provided color values
-		Red = (unsigned char) r;
-		Green = (unsigned char) g;
-		Blue = (unsigned char) b;
+		if (r < 256 && g < 256 && b < 256)
+		{	// save provided color values
+			Red = (unsigned char) r;
+			Green = (unsigned char) g;
+			Blue = (unsigned char) b;
+		}
 		led_write(Red, Green, Blue, Brightness);
 	}
 }
@@ -266,8 +268,12 @@ void allow_toggle(int t)
 
 void emergency_mode_loop()
 {
-	led_control(-1, -1, -1);
-	command_hvac(0);
+	while (monitor_serial() == false)
+	{
+		led_control(-1, -1, -1);
+	}
+	// reset led brightness
+	led_control(256, 256, 256);
 }
 
 void warmup_mode_loop(int t)
@@ -304,7 +310,7 @@ void cooldown_mode_loop(int t)
 	}
 }
 
-void monitor_serial()
+bool monitor_serial()
 // monitor the serial connection, and either respond or initiate a hvac state request
 {
     if (Serial.available() > 0)
@@ -327,7 +333,7 @@ void monitor_serial()
         else if (serialRequest < 0 || serialRequest > 3)
         // if we timed out(-1), or the integer is invalid
         {
-            return; // don't do anything
+            return false; // don't do anything
         }
 
         else
@@ -336,7 +342,13 @@ void monitor_serial()
 		}
         
         message_timestamp = millis();
+		return true;
     }
+	else
+	{
+		return false;
+	}
+	
 }
 
 void setup()
@@ -367,25 +379,31 @@ void setup()
 
 void loop()
 {
-	monitor_serial();
-	
-	
-	// also check if we are in transition
+	// check if we are in a lockout state
 	
 	if (current_mode == 4)
 	{
 		// warming up
 		warmup_mode_loop(target_mode);
+		monitor_serial();
 	}
 	else if (current_mode == 5)
 	{
 		// cooling down
 		cooldown_mode_loop(target_mode);
+		monitor_serial();
 	}
 	
 	else if (millis() - message_timestamp > thermostat_timeout)
 	{
 		// if we are abandoned
+
+		command_hvac(0);
 		emergency_mode_loop();
 	}
+	else
+	{
+		monitor_serial();
+	}
+	
 }
