@@ -268,12 +268,16 @@ void allow_toggle(int t)
 
 void emergency_mode_loop()
 {
-	while (monitor_serial() == false)
+	if (monitor_serial() == false)
 	{
 		led_control(-1, -1, -1);
 	}
-	// reset led brightness
-	led_control(256, 256, 256);
+	else
+	{
+		// reset led brightness
+		led_control(256, 256, 256);
+	}
+	
 }
 
 void warmup_mode_loop(int t)
@@ -398,7 +402,6 @@ void loop()
 	{
 		// if we are abandoned
 
-		command_hvac(0);
 		emergency_mode_loop();
 	}
 	else
