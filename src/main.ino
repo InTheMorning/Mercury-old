@@ -2,6 +2,7 @@
 #define relayON LOW
 #define relayOFF HIGH
 #define BITS_PER_SECOND 9600
+#define coils_offset 1000
 #define fan_relay_pin 2
 #define fan_speed_relay_pin 3
 #define stage_1_relay_pin 4
@@ -10,9 +11,11 @@
 #define green_light_pin 10
 #define blue_light_pin 11
 
+
 const unsigned long thermostat_timeout = (60000 * 15); // emergency mode trigger (minutes)
+const unsigned long preheat_timeout = (1000 * 5); // preheat before blower (seconds)
 const unsigned long warmup_timeout = (1000 * 30); // warmup before full heat (seconds)
-const unsigned long cooldown_timeout = (1000 * 30); // fan cooldown after heating (seconds)
+const unsigned long cooldown_timeout = (1000 * 20); // fan cooldown after heating (seconds)
 const unsigned char led_max_brightness = 222; // max is 255
 
 
@@ -26,6 +29,7 @@ char *status_strings[] =
 	"Fan",
 	"Low heat",
 	"High heat",
+	"Pre-heating",
 	"Warming up",
 	"Cooling down"
 	};
@@ -33,6 +37,7 @@ char *status_strings[] =
 unsigned long message_timestamp = 0;
 unsigned long state_change_timestamp = 0;
 unsigned long start_warmup_timestamp = 0;
+unsigned long start_preheat_timestamp = 0;
 unsigned long start_cooldown_timestamp = 0;
 
 void led_control(int r, int g, int b)
@@ -127,15 +132,23 @@ int set_hvac_state(int n)
 // relay and led definitions for hvac heating states
 {
 	static int current_relay_state;
-	
-	if (n == 4)
+	if (n == 5)
 	{
-		// state 4: prepare full heat
+		// state 5: prepare full heat
 		digitalWrite(fan_relay_pin, relayON);
 		digitalWrite(fan_speed_relay_pin, relayOFF);
 		digitalWrite(stage_1_relay_pin, relayON);
 		digitalWrite(stage_2_relay_pin, relayON);
 		led_control(255,20,0);
+	}
+	else if (n == 4)
+	{
+		// state 4: preheat
+		digitalWrite(fan_relay_pin, relayOFF);
+		digitalWrite(fan_speed_relay_pin, relayOFF);
+		digitalWrite(stage_1_relay_pin, relayON);
+		digitalWrite(stage_2_relay_pin, relayOFF);
+		led_control(255,80,0);
 	}
     else if (n == 3)
 	{
@@ -191,38 +204,50 @@ int set_hvac_state(int n)
 void command_hvac(int n)
 // handle incoming request
 {
-	if (current_mode == 0 || current_mode == 1)
+	if (current_mode == n)
 	{
-		if (n == 0 || n == 1)
+		return;
+	}
+	else if (current_mode == 0) 
+	{
+		if (n == 1)
 		{
-			// allow toggle fan on/off
-			if (current_mode != n)
-			{
-				allow_toggle(n);
-			}
+			// allow toggle fan on
+			allow_toggle(n);
 		}
 		else if (n == 2 || n == 3)
 		{
-			require_warmup(2, n);
+			require_preheat(n);
 		}
 	}
-	else if (current_mode == 2 || current_mode == 3)
+	else if (current_mode == 1)
+	{
+		if (n == 0 || n == 2)
+		{
+			// allow toggle off or heat
+			allow_toggle(n);
+		}
+		else if (n == 3)
+		{
+			require_warmup();
+		}
+	}
+	else if (current_mode == 2 || current_mode == 3 || current_mode == 4)
 	{
 		if (n == 0 || n == 1)
 		{
 			require_cooldown(n);
 		}
-		else if (n == 2 && current_mode != n)
+		else if (n == 2)
 		{
-			// allow toggle if different
 			allow_toggle(n);
 		}
-		else if (n == 3 && current_mode != n)
+		else if (n == 3)
 		{
-			require_warmup(4, n);
+			require_warmup();
 		}
 	}
-	else if (current_mode == 4)
+	else if (current_mode == 5)
 	{
 		if (n == 2)
 		{
@@ -230,7 +255,7 @@ void command_hvac(int n)
 			allow_toggle(n);
 		}
 	}
-	else if (current_mode == 5)
+	else if (current_mode == 6)
 	{
 		if (n == 2)
 		{
@@ -238,24 +263,35 @@ void command_hvac(int n)
 			allow_toggle(n);
 		}
 	}
-	// Acknowledge command reception
-	Serial.println(target_mode);
 }
 
-void require_warmup(int newstate, int t)
+void require_preheat(int t) // target state
 {
-	start_warmup_timestamp = millis();
-	set_hvac_state(newstate);
+	start_preheat_timestamp = millis();
+	set_hvac_state(4);
 	current_mode = 4;
 	target_mode = t;
 }
+
+void require_warmup()
+{
+	start_warmup_timestamp = millis();
+	if (set_hvac_state(-1) != 2)
+	{
+		set_hvac_state(2);
+		delay(coils_offset);
+	}
+	set_hvac_state(5);
+	current_mode = 5;
+	target_mode = 3;
+}
 	
-void require_cooldown(int t)
+void require_cooldown(int t) // target state
 {
 	// require cooldown
 	start_cooldown_timestamp = millis();
 	set_hvac_state(1);
-	current_mode = 5;
+	current_mode = 6;
 	target_mode = t;
 }
 
@@ -270,6 +306,7 @@ void emergency_mode_loop()
 {
 	if (monitor_serial() == false)
 	{
+		command_hvac(0);
 		led_control(-1, -1, -1);
 	}
 	else
@@ -280,6 +317,24 @@ void emergency_mode_loop()
 	
 }
 
+void preheat_mode_loop(int t)
+{
+	// flash the led
+	led_control(-1, -1, -1);
+
+	// check if we should exit this mode
+	if (millis() - start_preheat_timestamp > preheat_timeout)
+	{
+		if (t == 2)
+		{
+			allow_toggle(t);
+		}
+		else
+		{
+			require_warmup();
+		}
+	}
+}
 void warmup_mode_loop(int t)
 {
 	// flash the led
@@ -288,16 +343,7 @@ void warmup_mode_loop(int t)
 	// check if we should exit this mode
 	if (millis() - start_warmup_timestamp > warmup_timeout)
 	{
-		int cm = set_hvac_state(-1);
-		
-		if (cm >= t)
-		{
-			allow_toggle(t);
-		}
-		else
-		{
-			require_warmup(4, t);
-		}
+		allow_toggle(t);
 	}
 }
 
@@ -324,13 +370,13 @@ bool monitor_serial()
         if (serialRequest == 10)
 		{
         	// special code to retrieve current mode via serial
-			delay(1);
+			delay(5);
 			Serial.println(status_strings[current_mode]);
 		}
 		else if (serialRequest == 11)
 		{
         	// special code to retrieve heater state via serial
-			delay(1);
+			delay(5);
 			Serial.println(set_hvac_state(-1));
 		}
         
@@ -343,6 +389,8 @@ bool monitor_serial()
         else
 		{
 			command_hvac(serialRequest);
+			// Acknowledge command reception
+			Serial.println(target_mode);
 		}
         
         message_timestamp = millis();
@@ -387,11 +435,17 @@ void loop()
 	
 	if (current_mode == 4)
 	{
+		// preheating
+		preheat_mode_loop(target_mode);
+		monitor_serial();
+	}
+	else if (current_mode == 5)
+	{
 		// warming up
 		warmup_mode_loop(target_mode);
 		monitor_serial();
 	}
-	else if (current_mode == 5)
+	else if (current_mode == 6)
 	{
 		// cooling down
 		cooldown_mode_loop(target_mode);
