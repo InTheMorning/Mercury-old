@@ -290,6 +290,11 @@ void require_cooldown(int t) // target state
 {
 	// require cooldown
 	start_cooldown_timestamp = millis();
+	if (set_hvac_state(-1) = 3)
+	{
+		set_hvac_state(2);
+		delay(coils_offset);
+	}
 	set_hvac_state(1);
 	current_mode = 6;
 	target_mode = t;
