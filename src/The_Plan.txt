@@ -1,0 +1,24 @@
+the arduino will:
+    
+    - monitor and report 
+        - status
+        - temperature
+        - time
+    
+    - change status based on 
+        - thermostat demands
+        - time
+        - temperature
+    
+    - display status via LED
+
+The raspberry pi will:
+    - run a thermostat
+    - run an interface
+    - save settings to file
+    
+    
+TODO:
+    - have distinct preheat and transition warmups
+    - save color definitions for modes so they can be called without tripping the hvac state change timestamp
+    - check if r,g,b is greater than 255 ?

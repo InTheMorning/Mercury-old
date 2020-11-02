@@ -13,7 +13,7 @@
 
 
 const unsigned long thermostat_timeout = (60000 * 15); // emergency mode trigger (minutes)
-const unsigned long preheat_timeout = (1000 * 5); // preheat before blower (seconds)
+const unsigned long preheat_timeout = (1000 * 3); // preheat before blower (seconds)
 const unsigned long warmup_timeout = (1000 * 30); // warmup before full heat (seconds)
 const unsigned long cooldown_timeout = (1000 * 20); // fan cooldown after heating (seconds)
 const unsigned char led_max_brightness = 222; // max is 255
@@ -290,7 +290,7 @@ void require_cooldown(int t) // target state
 {
 	// require cooldown
 	start_cooldown_timestamp = millis();
-	if (set_hvac_state(-1) = 3)
+	if (set_hvac_state(-1) == 3)
 	{
 		set_hvac_state(2);
 		delay(coils_offset);
