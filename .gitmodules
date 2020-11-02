@@ -1,3 +1,0 @@
-[submodule "lib/python-bme280"]
-	path = lib/python-bme280
-	url = https://github.com/InTheMorning/python-bme280

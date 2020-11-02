@@ -17,8 +17,3 @@ The raspberry pi will:
     - run an interface
     - save settings to file
     
-    
-TODO:
-    - have distinct preheat and transition warmups
-    - save color definitions for modes so they can be called without tripping the hvac state change timestamp
-    - check if r,g,b is greater than 255 ?
