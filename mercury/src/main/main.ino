@@ -2,7 +2,8 @@
 #define relayON LOW
 #define relayOFF HIGH
 #define BITS_PER_SECOND 9600
-#define coils_offset 1000
+#define coils_offset 25
+#define serial_response_delay 11
 #define fan_relay_pin 2
 #define fan_speed_relay_pin 3
 #define stage_1_relay_pin 4
@@ -11,9 +12,8 @@
 #define green_light_pin 10
 #define blue_light_pin 11
 
-
 const unsigned long thermostat_timeout = (60000 * 15); // emergency mode trigger (minutes)
-const unsigned long preheat_timeout = (1000 * 3); // preheat before blower (seconds)
+const unsigned long preheat_timeout = (1000 * 2); // preheat before blower (seconds)
 const unsigned long warmup_timeout = (1000 * 30); // warmup before full heat (seconds)
 const unsigned long cooldown_timeout = (1000 * 20); // fan cooldown after heating (seconds)
 const unsigned char led_max_brightness = 222; // max is 255
@@ -375,13 +375,13 @@ bool monitor_serial()
         if (serialRequest == 10)
 		{
         	// special code to retrieve current mode via serial
-			delay(5);
+			delay(serial_response_delay);
 			Serial.println(status_strings[current_mode]);
 		}
 		else if (serialRequest == 11)
 		{
         	// special code to retrieve heater state via serial
-			delay(5);
+			delay(serial_response_delay);
 			Serial.println(set_hvac_state(-1));
 		}
         
@@ -395,6 +395,7 @@ bool monitor_serial()
 		{
 			command_hvac(serialRequest);
 			// Acknowledge command reception
+			delay(serial_response_delay);
 			Serial.println(target_mode);
 		}
         
