@@ -1,9 +1,10 @@
 import atexit
+import json
 from logging import (debug, info, error, critical, warning)
 import logging
 import paho.mqtt.client as mqtt
 import serial
-import time
+from time import sleep
 
 
 class HvacState:
@@ -12,53 +13,69 @@ class HvacState:
         self.mode_number = 0
         self.mode = 'off'
         self.serial = None
-        self.status = 'offline'
+        self.status = 'Offline'
+        self.temporary_statuses = {
+                "Pre-heating",
+                "Warming up",
+                "Cooling down"
+                }
 
-    def fetch_hvac_state(self):
+    def fetch_hvac_mode(self):
         ser = self.serial
-
-        # get status string
-        ser.write(b'10\n')
-        response = ser.readline().decode(encoding='UTF-8').strip()
-        status = response
+        valid = False
 
         # get mode number
-        ser.write(b'11\n')
-        response = ser.readline().decode(encoding='UTF-8').strip()
-        mode_number = int(response)
+        while not valid:
+            write_serial(ser, 11)
+            response = read_serial(ser, 'int')
+            if isinstance(response, int):
+                valid = True
 
-        if mode_number == 3:
-            mode = 'heat'
-            aux = 'ON'
-        elif mode_number == 2:
-            aux = 'OFF'
+        mode_number = response
+
+        if mode_number in range(2, 4):
             mode = 'heat'
         elif mode_number == 1:
             mode = 'fan_only'
-            aux = None
         elif mode_number == 0:
             mode = 'off'
-            aux = None
         else:
-            error("invalid mode number recieved")
+            error("invalid mode number received: %s", mode_number)
             return
 
-        if aux == 'ON' or aux == 'OFF':
-            self.aux = aux
         self.mode_number = mode_number
         self.mode = mode
-        if len(status) in range(3, 21):
-            self.status = status
+        self.fetch_hvac_status()
+
+    def fetch_hvac_status(self):
+        ser = self.serial
+        valid = False
+        tries = 0
+        while not valid and tries < 60:
+            if self.status not in self.temporary_statuses and tries < 10:
+                write_serial(ser, 10)
+            response = read_serial(ser, 'str')
+            if isinstance(response, str):
+                if len(response) in range(3, 21):
+                    self.status = response
+                    valid = True
+            tries += 1
 
     def change_hvac_state(self, mode_number):
         ser = self.serial
-        message = str(mode_number) + '\n'
-        ser.write(message.encode(encoding='UTF-8'))
-        response = ser.readline().decode(encoding='UTF-8').strip()
-        if int(response) == mode_number:
-            self.fetch_hvac_state()
+        valid = False
+        tries = 0
+        while not valid and tries < 60:
+            write_serial(ser, mode_number)
+            response = read_serial(ser, 'int')
+            if isinstance(response, int):
+                valid = True
+        if response == mode_number:
+            debug("received mode number %d confirmation", mode_number)
+            self.fetch_hvac_mode()
         else:
-            error('Did not receive confirmation packet')
+            error("got wrong confirmation from hvac:"
+                "expected %s, got %s" % (mode_number, response))
 
     def setup_serial(self, device='/dev/ttyAMA0', baudrate=9600, timeout=1):
         debug("Getting heater serial connection...")
@@ -73,15 +90,73 @@ class HvacState:
             self.serial = ser
 
 
+def read_serial(ser, x):
+    try:
+        response = ser.readline().decode(encoding='UTF-8').strip()
+    except BaseException as e:
+        error("serial error: %s", e)
+        return
+    else:
+        if response:
+            if x == 'int':
+                if response.isdigit():
+                    debug("serial returning int %s", response)
+                    return int(response)
+                else:
+                    error("invalid response, %s is not an int", response)
+                    return
+            elif x == 'str':
+                debug("received string response: %s", response)
+                return response
+        else:
+            debug("serial empty response")
+            return
+
+
+def write_serial(ser, i):
+    s = str(i) + '\n'
+    ser.write(s.encode(encoding='UTF-8'))
+    sleep(0.011)
+    return
+
+
 def on_message(client, userdata, message):
     message_string = str(message.payload.decode("utf-8"))
     debug("message received %s", message_string)
     debug("message topic=%s", message.topic)
     debug("message qos=%d", message.qos)
     debug("message retain flag=%d", message.retain)
-    client.publish("hvac/state/aux", h.aux)
-    client.publish("hvac/state/mode", h.mode)
-    client.publish("hvac/state/status", h.status)
+    if message.topic == ('hvac/call/aux'):
+        aux = message_string
+        if aux == 'ON':
+            if h.mode_number == 2:
+                h.change_hvac_state(3)
+        elif aux == 'OFF':
+            if h.mode_number == 3:
+                h.change_hvac_state(2)
+        else:
+            error('invalid aux state: %s', aux)
+            return
+        h.aux = aux
+        client.publish("hvac/state/aux", aux)
+
+    elif message.topic == ('hvac/call/mode'):
+        mode = message_string
+        if mode == 'heat':
+            if h.aux == 'ON':
+                mode_number = 3
+            else:
+                mode_number = 2
+        elif mode == 'fan_only':
+            mode_number = 1
+        elif mode == 'off':
+            mode_number = 0
+        else:
+            error("invalid mode: %s", mode)
+            return
+        h.change_hvac_state(mode_number)
+        h.mode = mode
+        client.publish("hvac/state/mode", mode)
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -89,7 +164,7 @@ logging.basicConfig(level=logging.DEBUG)
 # Start serial connection
 h = HvacState()
 h.setup_serial()
-h.fetch_hvac_state()
+h.fetch_hvac_mode()
 
 broker_address = "localhost"
 info("creating new instance")
@@ -104,11 +179,20 @@ info("Subscribing to topics")
 client.subscribe("hvac/call/mode")
 client.subscribe("hvac/call/aux")
 
-
 info("Publishing message to topic")
-client.publish("hvac/state/mode", "heat")
-client.publish("hvac/state/aux", "ON")
-time.sleep(40)
-client.publish("hvac/state/mode", "off")
-client.publish("hvac/state/aux", "OFF")
+client.publish("hvac/state/aux", h.aux)
+client.publish("hvac/state/mode", h.mode)
+
+
+while True:
+    h.fetch_hvac_status()
+    cached_status = h.status
+    info("got current status: %s", cached_status)
+    state_json = json.dumps({'status': cached_status})
+    client.publish("hvac/state/status", state_json)
+    while True:
+        if h.status != cached_status:
+            break
+        sleep(0.5)
+
 client.loop_stop()

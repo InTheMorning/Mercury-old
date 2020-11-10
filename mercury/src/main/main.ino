@@ -26,7 +26,7 @@ int target_mode = -1; // used when in a temporary mode
 char *status_strings[] = 
 	{
 	"Off",
-	"Fan",
+	"Fan only",
 	"Low heat",
 	"High heat",
 	"Pre-heating",
@@ -305,6 +305,7 @@ void allow_toggle(int t)
 	set_hvac_state(t);
 	current_mode = t;
 	target_mode = t;
+	Serial.println(status_strings[current_mode]);
 }
 
 void emergency_mode_loop()
@@ -374,15 +375,15 @@ bool monitor_serial()
         
         if (serialRequest == 10)
 		{
-        	// special code to retrieve current mode via serial
+        	// special code to retrieve status string via serial
 			delay(serial_response_delay);
 			Serial.println(status_strings[current_mode]);
 		}
 		else if (serialRequest == 11)
 		{
-        	// special code to retrieve heater state via serial
+        	// special code to retrieve mode number via serial
 			delay(serial_response_delay);
-			Serial.println(set_hvac_state(-1));
+			Serial.println(target_mode);
 		}
         
         else if (serialRequest < 0 || serialRequest > 3)
@@ -393,10 +394,10 @@ bool monitor_serial()
 
         else
 		{
-			command_hvac(serialRequest);
 			// Acknowledge command reception
 			delay(serial_response_delay);
-			Serial.println(target_mode);
+			Serial.println(serialRequest);
+			command_hvac(serialRequest);
 		}
         
         message_timestamp = millis();
