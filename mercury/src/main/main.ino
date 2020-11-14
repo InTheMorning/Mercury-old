@@ -1,4 +1,7 @@
+
 #include <Arduino.h>
+#include <ArduinoJson.h>
+
 #define relayON LOW
 #define relayOFF HIGH
 #define BITS_PER_SECOND 9600
@@ -17,13 +20,14 @@ const unsigned long preheat_timeout = (1000 * 2); // preheat before blower (seco
 const unsigned long warmup_timeout = (1000 * 30); // warmup before full heat (seconds)
 const unsigned long cooldown_timeout = (1000 * 20); // fan cooldown after heating (seconds)
 const unsigned char led_max_brightness = 222; // max is 255
-
+const int capacity = JSON_OBJECT_SIZE(2) + 2*JSON_OBJECT_SIZE(1);
+StaticJsonDocument<capacity> state_json;
 
 // operating state of the controller
 int current_mode = -1;
 int target_mode = -1; // used when in a temporary mode
 
-char *status_strings[] = 
+const char *status_strings[] = 
 	{
 	"Off",
 	"Fan only",
@@ -217,7 +221,7 @@ void command_hvac(int n)
 		}
 		else if (n == 2 || n == 3)
 		{
-			require_preheat(n);
+			require_preheat(n);100
 		}
 	}
 	else if (current_mode == 1)
@@ -262,6 +266,10 @@ void command_hvac(int n)
 			// cancel cooldown
 			allow_toggle(n);
 		}
+		else if (n == 0)
+		{
+			target_mode = 0;
+		}
 	}
 }
 
@@ -305,7 +313,6 @@ void allow_toggle(int t)
 	set_hvac_state(t);
 	current_mode = t;
 	target_mode = t;
-	Serial.println(status_strings[current_mode]);
 }
 
 void emergency_mode_loop()
@@ -377,15 +384,12 @@ bool monitor_serial()
 		{
         	// special code to retrieve status string via serial
 			delay(serial_response_delay);
-			Serial.println(status_strings[current_mode]);
+			state_json["mode"] = target_mode;
+			state_json["status"] = status_strings[current_mode];
+			serializeJson(state_json, Serial);
+			Serial.println();
 		}
-		else if (serialRequest == 11)
-		{
-        	// special code to retrieve mode number via serial
-			delay(serial_response_delay);
-			Serial.println(target_mode);
-		}
-        
+		        
         else if (serialRequest < 0 || serialRequest > 3)
         // if we timed out(-1), or the integer is invalid
         {
