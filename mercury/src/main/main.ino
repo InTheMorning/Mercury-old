@@ -21,7 +21,6 @@ const int capacity = JSON_OBJECT_SIZE(2) + 2*JSON_OBJECT_SIZE(1);
 StaticJsonDocument<capacity> state_json;
 
 // operating state of the controller
-bool aux = false;
 int current_mode = -1;
 int target_mode = -1; // used when in a temporary mode
 
@@ -323,7 +322,6 @@ bool monitor_serial()
 		{
         	// special code to retrieve status string via serial
 			delay(serial_response_delay);
-			state_json["aux"] = aux;
 			state_json["mode"] = target_mode;
 			state_json["status"] = status_strings[current_mode];
 			serializeJson(state_json, Serial);

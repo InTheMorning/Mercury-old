@@ -1,123 +1,127 @@
-import atexit
 import json
-from logging import (debug, info, error, critical, warning)
 import logging
 import paho.mqtt.client as mqtt
-import serial
-from time import sleep
+from logging import (debug, info, error, warning)
+from serialcom import (setup_serial, read_serial, write_serial)
 
 
 class HvacState:
     def __init__(self):
-        self.aux = 'OFF'
-        self.mode_number = 0
-        self.mode = 'off'
         self.serial = None
         self.status = 'Offline'
-        self.temporary_statuses = {
-                "Pre-heating",
-                "Warming up",
-                "Cooling down"
-                }
+        self.hvac_code = 0
+        self._aux = 0
+        self._mode = 0
 
-    def fetch_hvac_mode(self):
-        ser = self.serial
-        valid = False
-
-        # get mode number
-        while not valid:
-            write_serial(ser, 11)
-            response = read_serial(ser, 'int')
-            if isinstance(response, int):
-                valid = True
-
-        mode_number = response
-
-        if mode_number in range(2, 4):
-            mode = 'heat'
-        elif mode_number == 1:
-            mode = 'fan_only'
-        elif mode_number == 0:
-            mode = 'off'
+    @property
+    def aux(self):
+        if self.hvac_code == 3:
+            return 1
+        elif self.hvac_code == 2:
+            return 0
         else:
-            error("invalid mode number received: %s", mode_number)
-            return
+            return self._aux
 
-        self.mode_number = mode_number
-        self.mode = mode
-        self.fetch_hvac_status()
+    @aux.setter
+    def aux(self, value):
+        if value == 1:
+            if self.hvac_code == 2:
+                self.hvac_code = 3
+        elif value == 0:
+            if self.hvac_code == 3:
+                self.hvac_code = 2
+        else:
+            raise ValueError("Incorrect aux value")
+            value = 0
+        self._aux = value
 
-    def fetch_hvac_status(self):
+    @property
+    def mode(self):
+        if self.hvac_code == 3:
+            self.aux = 1
+            return 2
+        else:
+            return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        if value == 2:
+            if self.aux:
+                self.hvac_code = 3
+            else:
+                self.hvac_code = 2
+        elif value in range(0, 2):
+            self.hvac_code = value
+        else:
+            raise ValueError("Incorrect mode value")
+            value = 0
+        self._mode = value
+
+    def change_hvac_state(self, hvac_code):
         ser = self.serial
         valid = False
         tries = 0
+        response = ''
         while not valid and tries < 60:
-            if self.status not in self.temporary_statuses and tries < 10:
-                write_serial(ser, 10)
-            response = read_serial(ser, 'str')
-            if isinstance(response, str):
-                if len(response) in range(3, 21):
-                    self.status = response
-                    valid = True
+            write_serial(ser, hvac_code)
+            response = read_serial(ser)
             tries += 1
-
-    def change_hvac_state(self, mode_number):
-        ser = self.serial
-        valid = False
-        tries = 0
-        while not valid and tries < 60:
-            write_serial(ser, mode_number)
-            response = read_serial(ser, 'int')
             if isinstance(response, int):
                 valid = True
-        if response == mode_number:
-            debug("received mode number %d confirmation", mode_number)
-            self.fetch_hvac_mode()
+        debug("tried %d times", tries)
+        if response == hvac_code:
+            debug("received mode number %d confirmation", hvac_code)
         else:
             error("got wrong confirmation from hvac:"
-                "expected %s, got %s" % (mode_number, response))
+                  "expected %s, got %s" % (hvac_code, response))
 
-    def setup_serial(self, device='/dev/ttyAMA0', baudrate=9600, timeout=1):
-        debug("Getting heater serial connection...")
-        try:
-            ser = serial.Serial(device, baudrate, timeout=timeout)
-            info("Heater connected via serial connection.")
-        except BaseException:
-            error("Failed to start serial connection.  The program will exit.")
-            raise
+    def fetch_hvac_state(self):
+        ser = self.serial
+        write_serial(ser, 10)
+        json_obj = read_serial(ser)
+
+        if json_obj:
+            hvac_code = json_obj['mode']
+            status = json_obj['status']
+            if hvac_code in range(0, 4):
+                self.set_hvac_code(hvac_code)
+            else:
+                warning("invalid mode number received: %s", hvac_code)
+                return
+            self.status = status
         else:
-            atexit.register(ser.close)
-            self.serial = ser
-
-
-def read_serial(ser, x):
-    try:
-        response = ser.readline().decode(encoding='UTF-8').strip()
-    except BaseException as e:
-        error("serial error: %s", e)
-        return
-    else:
-        if response:
-            if x == 'int':
-                if response.isdigit():
-                    debug("serial returning int %s", response)
-                    return int(response)
-                else:
-                    error("invalid response, %s is not an int", response)
-                    return
-            elif x == 'str':
-                debug("received string response: %s", response)
-                return response
-        else:
-            debug("serial empty response")
+            warning("no json to parse")
             return
 
+    def set_hvac_code(self, value):
+        if value == 3:
+            self.aux = 1
+            self.mode = 2
+        elif value == 2:
+            self.aux = 0
+            self.mode = 2
+        else:
+            self.mode = value
 
-def write_serial(ser, i):
-    s = str(i) + '\n'
-    ser.write(s.encode(encoding='UTF-8'))
-    sleep(0.011)
-    return
+
+def aux_string(input):
+    _aux_strings = ['OFF', 'ON']
+    if isinstance(input, int):
+        return _aux_strings[input]
+    elif input in _aux_strings:
+        return _aux_strings.index(input)
+    else:
+        error("Can not convert input %s", input)
+
+
+def mode_string(input):
+    _mode_strings = ['off', 'fan_only', 'heat']
+    if isinstance(input, int):
+        return _mode_strings[input]
+    elif input in _mode_strings:
+        return _mode_strings.index(input)
+    else:
+        error("Can not convert input %s", input)
 
 
 def on_message(client, userdata, message):
@@ -126,45 +130,19 @@ def on_message(client, userdata, message):
     debug("message topic=%s", message.topic)
     debug("message qos=%d", message.qos)
     debug("message retain flag=%d", message.retain)
+
     if message.topic == ('hvac/call/aux'):
-        aux = message_string
-        if aux == 'ON':
-            if h.mode_number == 2:
-                h.change_hvac_state(3)
-        elif aux == 'OFF':
-            if h.mode_number == 3:
-                h.change_hvac_state(2)
-        else:
-            error('invalid aux state: %s', aux)
-            return
-        h.aux = aux
-        client.publish("hvac/state/aux", aux)
-
+        h.aux = aux_string(message_string)
     elif message.topic == ('hvac/call/mode'):
-        mode = message_string
-        if mode == 'heat':
-            if h.aux == 'ON':
-                mode_number = 3
-            else:
-                mode_number = 2
-        elif mode == 'fan_only':
-            mode_number = 1
-        elif mode == 'off':
-            mode_number = 0
-        else:
-            error("invalid mode: %s", mode)
-            return
-        h.change_hvac_state(mode_number)
-        h.mode = mode
-        client.publish("hvac/state/mode", mode)
+        h.mode = mode_string(message_string)
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 # Start serial connection
 h = HvacState()
-h.setup_serial()
-h.fetch_hvac_mode()
+h.serial = setup_serial('/dev/ttyAMA0', 9600, 1)
+h.fetch_hvac_state()
 
 broker_address = "localhost"
 info("creating new instance")
@@ -173,26 +151,31 @@ client.on_message = on_message  # attach function to callback
 
 info("connecting to broker %s", broker_address)
 client.connect(broker_address)  # connect to broker
-client.loop_start()  # start the loop
+# client.loop_start()  # start the loop
 
 info("Subscribing to topics")
 client.subscribe("hvac/call/mode")
 client.subscribe("hvac/call/aux")
 
-info("Publishing message to topic")
-client.publish("hvac/state/aux", h.aux)
-client.publish("hvac/state/mode", h.mode)
-
+aux = h.aux
+mode = h.mode
+hvac_code = h.hvac_code
+status = h.status
 
 while True:
-    h.fetch_hvac_status()
-    cached_status = h.status
-    info("got current status: %s", cached_status)
-    state_json = json.dumps({'status': cached_status})
-    client.publish("hvac/state/status", state_json)
-    while True:
-        if h.status != cached_status:
-            break
-        sleep(0.5)
-
-client.loop_stop()
+    client.loop(1)
+    if aux != h.aux or mode != h.mode:
+        if hvac_code != h.hvac_code:
+            h.change_hvac_state(h.hvac_code)
+        aux = h.aux
+        mode = h.mode
+        hvac_code = h.hvac_code
+        debug("Publishing message to topic")
+        client.publish("hvac/state/aux", aux_string(h.aux))
+        client.publish("hvac/state/mode", mode_string(h.mode))
+        client.publish("hvac/state/status", json.dumps({'status': h.status}))
+    else:
+        h.fetch_hvac_state()
+        if status != h.status:
+            status = h.status
+            client.publish("hvac/state/status", json.dumps({'status': status}))
