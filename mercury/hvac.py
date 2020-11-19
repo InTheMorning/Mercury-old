@@ -93,6 +93,18 @@ class HvacState:
             warning("no json to parse")
             return
 
+    def on_mqtt(self, client, userdata, message):
+        message_string = str(message.payload.decode("utf-8"))
+        debug("message received %s", message_string)
+        debug("message topic=%s", message.topic)
+        debug("message qos=%d", message.qos)
+        debug("message retain flag=%d", message.retain)
+
+        if message.topic == ('hvac/call/aux'):
+            self.aux = aux_string(message_string)
+        elif message.topic == ('hvac/call/mode'):
+            self.mode = mode_string(message_string)
+
     def set_hvac_code(self, value):
         if value == 3:
             self.aux = 1
@@ -124,58 +136,55 @@ def mode_string(input):
         error("Can not convert input %s", input)
 
 
-def on_message(client, userdata, message):
-    message_string = str(message.payload.decode("utf-8"))
-    debug("message received %s", message_string)
-    debug("message topic=%s", message.topic)
-    debug("message qos=%d", message.qos)
-    debug("message retain flag=%d", message.retain)
+def loop(client, hvac_state):
+    logging.basicConfig(level=logging.INFO)
 
-    if message.topic == ('hvac/call/aux'):
-        h.aux = aux_string(message_string)
-    elif message.topic == ('hvac/call/mode'):
-        h.mode = mode_string(message_string)
+    hvac_state.fetch_hvac_state()
+    aux = hvac_state.aux
+    mode = hvac_state.mode
+    hvac_code = hvac_state.hvac_code
+    status = hvac_state.status
+
+    while True:
+        client.loop(1)
+        if aux != hvac_state.aux or mode != hvac_state.mode:
+            if hvac_code != hvac_state.hvac_code:
+                hvac_state.change_hvac_state(hvac_state.hvac_code)
+            aux = hvac_state.aux
+            mode = hvac_state.mode
+            hvac_code = hvac_state.hvac_code
+            debug("Publishing message to topic")
+            client.publish("hvac/state/aux", aux_string(hvac_state.aux))
+            client.publish("hvac/state/mode", mode_string(hvac_state.mode))
+            client.publish("hvac/state/status",
+                           json.dumps({'status': hvac_state.status}))
+        else:
+            hvac_state.fetch_hvac_state()
+            if status != hvac_state.status:
+                status = hvac_state.status
+                client.publish("hvac/state/status",
+                               json.dumps({'status': status}))
 
 
-logging.basicConfig(level=logging.INFO)
+def main(port, broker_address):
+    hvac_state = HvacState()
+    client = mqtt.Client("HVAC")  # create new instance
 
-# Start serial connection
-h = HvacState()
-h.serial = setup_serial('/dev/ttyAMA0', 9600, 1)
-h.fetch_hvac_state()
+    # Start serial connection
+    hvac_state.serial = setup_serial(port, 9600, 1)
 
-broker_address = "localhost"
-info("creating new instance")
-client = mqtt.Client("HVAC")  # create new instance
-client.on_message = on_message  # attach function to callback
+    info("creating new instance")
+    client.on_message = hvac_state.on_mqtt  # attach function to callback
 
-info("connecting to broker %s", broker_address)
-client.connect(broker_address)  # connect to broker
-# client.loop_start()  # start the loop
+    info("connecting to broker %s", broker_address)
+    client.connect(broker_address)  # connect to broker
 
-info("Subscribing to topics")
-client.subscribe("hvac/call/mode")
-client.subscribe("hvac/call/aux")
+    info("Subscribing to topics")
+    client.subscribe("hvac/call/mode")
+    client.subscribe("hvac/call/aux")
 
-aux = h.aux
-mode = h.mode
-hvac_code = h.hvac_code
-status = h.status
+    loop(client, hvac_state)
 
-while True:
-    client.loop(1)
-    if aux != h.aux or mode != h.mode:
-        if hvac_code != h.hvac_code:
-            h.change_hvac_state(h.hvac_code)
-        aux = h.aux
-        mode = h.mode
-        hvac_code = h.hvac_code
-        debug("Publishing message to topic")
-        client.publish("hvac/state/aux", aux_string(h.aux))
-        client.publish("hvac/state/mode", mode_string(h.mode))
-        client.publish("hvac/state/status", json.dumps({'status': h.status}))
-    else:
-        h.fetch_hvac_state()
-        if status != h.status:
-            status = h.status
-            client.publish("hvac/state/status", json.dumps({'status': status}))
+
+if __name__ == "__main__":
+    main('/dev/ttyAMA0', 'localhost')

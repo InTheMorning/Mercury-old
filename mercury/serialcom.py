@@ -1,7 +1,7 @@
 import atexit
 import serial
 import json
-from logging import (debug, info, error)
+from logging import (debug, info, warning, error)
 from time import sleep
 
 
