@@ -38,7 +38,7 @@ def read_serial(ser):
                 except BaseException as e:
                     warning("received invalid json: %s", e)
         else:
-            debug("empty response from serial")
+            warning("empty response from serial")
             return
 
 
