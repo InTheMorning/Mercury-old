@@ -1,8 +1,29 @@
 import json
 import logging
+from enum import Enum
+from logging import debug, error, info, warning
+
 import paho.mqtt.client as mqtt
-from logging import (debug, info, error, warning)
-from serialcom import (setup_serial, read_serial, write_serial)
+
+from utils import read_serial, setup_serial, write_serial
+
+
+class ActionValue(Enum):
+    off = 0
+    fan = 1
+    idle = 2
+    heating = 3
+
+
+class BoolValue(Enum):
+    OFF = 0
+    ON = 1
+
+
+class ModeValue(Enum):
+    off = 0
+    fan_only = 1
+    heat = 2
 
 
 class HvacState:
@@ -10,19 +31,25 @@ class HvacState:
         self.serial = None
         self.status = 'Offline'
         self.hvac_code = 0
-        self.action = 0
         self._aux = 0
         self._mode = 0
         self._toggle = 0
 
     @property
+    def action(self):
+        if self.mode == 2:
+            if self.toggle == 1:
+                return ActionValue.heating.value
+            elif self.toggle == 0:
+                return ActionValue.idle.value
+        elif self.mode == 1:
+            return ActionValue.fan.value
+        elif self.mode == 0:
+            return ActionValue.off.value
+
+    @property
     def aux(self):
-        if self.hvac_code == 3:
-            return 1
-        elif self.hvac_code == 2:
-            return 0
-        else:
-            return self._aux
+        return self._aux
 
     @aux.setter
     def aux(self, value):
@@ -41,34 +68,26 @@ class HvacState:
     @mode.setter
     def mode(self, value):
         if value == 2:
-            aux = self.aux * self.toggle
+            hvac_code = value * self.toggle + (self.toggle * self.aux)
         else:
-            aux = 0
-        hvac_code = (value * self.toggle) + aux
+            hvac_code = value
         self.hvac_code = hvac_code
-        self.set_action()
         self._mode = value
 
     @property
     def toggle(self):
-        if self.hvac_code == 3:
-            self.aux = 1
-            return 1
-        else:
-            return self._toggle
+        return self._toggle
 
     @toggle.setter
     def toggle(self, value):
         if self.mode == 2:
-            aux = self.aux
+            self.hvac_code = value * (self.mode + self.aux)
+            self._toggle = value
         else:
-            aux = 0
-        hvac_code = value * (self.mode + aux)
-        self.hvac_code = hvac_code
-        self.set_action()
-        self._toggle = value
+            self._toggle = 0
 
     def change_hvac_state(self, hvac_code):
+        debug("sending %d state to hvac", hvac_code)
         ser = self.serial
         valid = False
         tries = 0
@@ -87,6 +106,7 @@ class HvacState:
                   "expected %s, got %s" % (hvac_code, response))
 
     def fetch_hvac_state(self):
+        debug("fetching state from hvac")
         ser = self.serial
         write_serial(ser, 10)
         json_obj = read_serial(ser)
@@ -111,20 +131,18 @@ class HvacState:
         debug("message qos=%d", message.qos)
         debug("message retain flag=%d", message.retain)
 
-        if message.topic == ('hvac/call/toggle'):
-            toggle = bool_string(message_string)
-            info("Toggle message detected: %d", toggle)
-            self.toggle = toggle
-        elif message.topic == ('hvac/call/aux'):
-            aux = bool_string(message_string)
-            info("Aux message detected: %d", aux)
-            self.aux = aux
+        if message.topic == ('hvac/call/aux'):
+            info("Aux message detected: %s", message_string)
+            self.aux = BoolValue[message_string].value
         elif message.topic == ('hvac/call/mode'):
-            mode = mode_string(message_string)
-            info("Mode message detected: %d", mode)
-            self.mode = mode
+            info("Mode message detected: %s", message_string)
+            self.mode = ModeValue[message_string].value
+        elif message.topic == ('hvac/call/toggle'):
+            info("Toggle message detected: %s", message_string)
+            self.toggle = BoolValue[message_string].value
 
     def set_hvac_code(self, value):
+        debug("setting values according to hvac code %d", value)
         if value == 3:
             self.aux = 1
             self.mode = 2
@@ -135,117 +153,90 @@ class HvacState:
             self.toggle = 1
         elif value == 1:
             self.mode = 1
-            self.toggle = 1
+            self.toggle = 0
         elif value == 0:
             self.toggle = 0
 
-    def set_action(self):
-        if self.mode == 2:
-            if self.toggle == 1:
-                self.action = action_string('heating')
-            elif self.toggle == 0:
-                self.action = action_string('idle')
-        elif self.mode == 1:
-            self.action = action_string('fan')
-        if self.mode == 0:
-            self.action = action_string('off')
-
-
-def bool_string(input):
-    _bool_strings = ['OFF', 'ON']
-    if isinstance(input, int):
-        return _bool_strings[input]
-    elif isinstance(input, str):
-        if input in _bool_strings:
-            return _bool_strings.index(input)
-        else:
-            error("unrecognized boolean string %s", input)
-    else:
-        error("must be boolean or string, not %s", type(input))
-
-
-def mode_string(input):
-    _mode_strings = ['off', 'fan_only', 'heat']
-    if isinstance(input, int):
-        return _mode_strings[input]
-    elif input in _mode_strings:
-        return _mode_strings.index(input)
-    else:
-        error("Can not convert input %s", input)
-
-
-def action_string(input):
-    _action_strings = ['off', 'fan', 'idle', 'heating']
-    if isinstance(input, int):
-        return _action_strings[input]
-    elif input in _action_strings:
-        return _action_strings.index(input)
-    else:
-        error("Can not convert input %s", input)
-
 
 def loop(client, hvac_state):
-
+    debug("starting main loop")
     hvac_state.fetch_hvac_state()
+
     action = hvac_state.action
     aux = hvac_state.aux
+    hvac_code = hvac_state.hvac_code
     mode = hvac_state.mode
     toggle = hvac_state.toggle
-    hvac_code = hvac_state.hvac_code
     status = hvac_state.status
-
+    debug("action: %s, aux: %s, hc: %d, mode: %s, toggle: %s",
+          ActionValue(action).name,
+          BoolValue(aux).name,
+          hvac_code,
+          ModeValue(mode).name,
+          BoolValue(toggle).name
+          )
     while True:
-        client.loop(3)
+        debug("running mqtt loop")
+        client.loop(5)
+        debug("action: %s, aux: %s, hc: %d, mode: %s, toggle: %s",
+              ActionValue(action).name,
+              BoolValue(aux).name,
+              hvac_code,
+              ModeValue(mode).name,
+              BoolValue(toggle).name
+              )
         if aux != hvac_state.aux:
             aux = hvac_state.aux
-            info("Publishing aux: %s", aux)
-            client.publish('hvac/state/aux', bool_string(aux))
-        elif mode != hvac_state.mode:
-            mode = hvac_state.mode
-            info("Publishing mode: %s", mode)
-            client.publish('hvac/state/mode', mode_string(mode))
-        elif toggle != hvac_state.toggle:
-            toggle = hvac_state.toggle
-            info("Publishing switch state: %s", toggle)
-            client.publish('hvac/state/toggle', bool_string(toggle))
-        elif action != hvac_state.action:
-            action = hvac_state.action
-            info("Publishing action: %s", action)
-            client.publish('hvac/state/action', action_string(action))
-        elif hvac_code != hvac_state.hvac_code:
-            hvac_code = hvac_state.hvac_code
-            info("Sending new state to hvac: %s", hvac_code)
-            hvac_state.change_hvac_state(hvac_code)
-        else:
+            info("Publishing aux: %s", BoolValue(aux).name)
+            client.publish('hvac/state/aux', BoolValue(aux).name)
+        if hvac_code == hvac_state.hvac_code:
+            if mode != hvac_state.mode:
+                mode = hvac_state.mode
+                info("Publishing mode: %s", ModeValue(mode).name)
+                client.publish('hvac/state/mode', ModeValue(mode).name)
+            if toggle != hvac_state.toggle:
+                toggle = hvac_state.toggle
+                info("Publishing switch state: %s", BoolValue(toggle).name)
+                client.publish('hvac/state/toggle', BoolValue(toggle).name)
+            if action != hvac_state.action:
+                action = hvac_state.action
+                info("Publishing action: %s", ActionValue(action).name)
+                client.publish('hvac/state/action', ActionValue(action).name)
             hvac_state.fetch_hvac_state()
-            if status != hvac_state.status:
-                status = hvac_state.status
-                info("Publishing status: %s", status)
-                client.publish('hvac/state/status',
-                               json.dumps({'status': status}))
+
+        else:
+            hc = hvac_state.hvac_code
+            info("Sending new state to hvac: %s", hc)
+            hvac_state.change_hvac_state(hc)
+            hvac_state.fetch_hvac_state()
+            hvac_code = hvac_state.hvac_code
+
+        if status != hvac_state.status:
+            status = hvac_state.status
+            info("Publishing status: %s", status)
+            client.publish('hvac/state/status',
+                           json.dumps({'status': status}))
 
 
 def main(port, broker_address):
     hvac_state = HvacState()
-    client = mqtt.Client("HVAC")  # create new instance
+    client = mqtt.Client("HVAC")
 
-    # Start serial connection
     hvac_state.serial = setup_serial(port, 9600, 1)
 
     info("creating new instance")
-    client.on_message = hvac_state.on_mqtt_message  # attach function to callback
+    client.on_message = hvac_state.on_mqtt_message
 
     info("connecting to broker %s", broker_address)
-    client.connect(broker_address)  # connect to broker
+    client.connect(broker_address)
 
     info("Subscribing to topics")
     client.subscribe("hvac/call/aux")
     client.subscribe("hvac/call/mode")
     client.subscribe("hvac/call/toggle")
-
     loop(client, hvac_state)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     main('/dev/ttyAMA0', 'localhost')

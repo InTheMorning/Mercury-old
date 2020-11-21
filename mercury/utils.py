@@ -1,8 +1,9 @@
 import atexit
-import serial
 import json
-from logging import (debug, info, warning, error)
+from logging import debug, error, info, warning
 from time import sleep
+
+import serial
 
 
 def setup_serial(device, baudrate, timeout):

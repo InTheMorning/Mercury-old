@@ -6,9 +6,8 @@
 #define BITS_PER_SECOND 9600
 #define serial_response_delay 11
 #define fan_relay_pin 2
-#define fan_speed_relay_pin 3
-#define stage_1_relay_pin 4
-#define stage_2_relay_pin 7
+#define stage_1_relay_pin 3
+#define stage_2_relay_pin 4
 #define red_light_pin 9
 #define green_light_pin 10
 #define blue_light_pin 11
@@ -136,7 +135,6 @@ int set_hvac_state(int n)
 	{
 		// state 3: full heat
 		digitalWrite(fan_relay_pin, relayON);
-		digitalWrite(fan_speed_relay_pin, relayON);
 		digitalWrite(stage_1_relay_pin, relayON);
 		digitalWrite(stage_2_relay_pin, relayON);
 		led_control(255,0,0);
@@ -146,7 +144,6 @@ int set_hvac_state(int n)
 	{
 		// state 2: low heat
 		digitalWrite(fan_relay_pin, relayON);
-		digitalWrite(fan_speed_relay_pin, relayOFF);
 		digitalWrite(stage_1_relay_pin, relayON);
 		digitalWrite(stage_2_relay_pin, relayOFF);
 		led_control(255,80,0);
@@ -156,7 +153,6 @@ int set_hvac_state(int n)
 	{
 		// state 1: fan only
 		digitalWrite(fan_relay_pin, relayON);
-		digitalWrite(fan_speed_relay_pin, relayOFF);
 		digitalWrite(stage_1_relay_pin, relayOFF);
 		digitalWrite(stage_2_relay_pin, relayOFF);
 		led_control(0,255,0);
@@ -166,7 +162,6 @@ int set_hvac_state(int n)
 	// state 0: off
 	{
 		digitalWrite(fan_relay_pin, relayOFF);
-		digitalWrite(fan_speed_relay_pin, relayOFF);
 		digitalWrite(stage_1_relay_pin, relayOFF);
 		digitalWrite(stage_2_relay_pin, relayOFF);
 		led_control(8,8,12);
@@ -361,7 +356,6 @@ void setup()
 	pinMode(stage_2_relay_pin, OUTPUT);
 	pinMode(stage_1_relay_pin, OUTPUT);
 	pinMode(fan_relay_pin, OUTPUT);
-    pinMode(fan_speed_relay_pin, OUTPUT);
 	
     // color led
 	pinMode(red_light_pin, OUTPUT);
