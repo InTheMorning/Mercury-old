@@ -1,9 +1,47 @@
 import atexit
 import json
 from logging import debug, error, info, warning
+from os import chmod, mknod, path, remove, stat
 from time import sleep
 
 import serial
+
+
+def choose_state_file():
+    filename = path.join('/tmp', 'hvac.state.json')
+    debug("Setting state file to %s", filename)
+    if path.isfile(filename):
+        if oct(stat(filename).st_mode)[-3:] == '600':
+            return filename
+        else:
+            remove(filename)
+    mknod(filename)
+    chmod(filename, 0o600)
+
+
+def load_state(filename):
+    defaults = {'action': 0,
+                'aux': 0,
+                'hvac_code': 0,
+                'mode': 0,
+                'toggle': 0,
+                'status': 'Offline'
+                }
+    debug("Loading state from %s...", filename)
+    try:
+        with open(filename, 'r') as f:
+            state = json.load(f)
+    except BaseException as e:
+        debug(e)
+        warning("valid state file not found, using defaults")
+        state = defaults
+    return state
+
+
+def save_state(filename, state):
+    debug("Saving to file %s :  %s", filename, state)
+    with open(filename, 'w') as f:
+        json.dump(state, f)
 
 
 def setup_serial(device, baudrate, timeout):

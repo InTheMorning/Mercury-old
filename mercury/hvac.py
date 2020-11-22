@@ -1,11 +1,13 @@
 import json
 import logging
+from datetime import datetime, timedelta
 from enum import Enum
 from logging import debug, error, info, warning
 
 import paho.mqtt.client as mqtt
 
-from utils import read_serial, setup_serial, write_serial
+from utils import (choose_state_file, load_state, read_serial, save_state,
+                   setup_serial, write_serial)
 
 
 class ActionValue(Enum):
@@ -30,10 +32,10 @@ class HvacState:
     def __init__(self):
         self.serial = None
         self.status = 'Offline'
-        self.hvac_code = 0
-        self._aux = 0
-        self._mode = 0
-        self._toggle = 0
+        self.hvac_code = None
+        self._aux = None
+        self._mode = None
+        self._toggle = None
 
     @property
     def action(self):
@@ -116,13 +118,12 @@ class HvacState:
             status = json_obj['status']
             if hvac_code in range(0, 4):
                 self.set_hvac_code(hvac_code)
+                self.status = status
             else:
-                warning("invalid mode number received: %s", hvac_code)
-                return
-            self.status = status
+                warning("hvac invalid mode number: %s", hvac_code)
         else:
             warning("no json to parse")
-            return
+        return datetime.now()
 
     def on_mqtt_message(self, client, userdata, message):
         message_string = str(message.payload.decode("utf-8"))
@@ -156,85 +157,106 @@ class HvacState:
             self.toggle = 0
         elif value == 0:
             self.toggle = 0
+            self.hvac_code = value
 
 
-def loop(client, hvac_state):
-    debug("starting main loop")
-    hvac_state.fetch_hvac_state()
+def loop(client, hvac_state, statefile):
+    info("Preparing main loop")
+    previous_state = load_state(statefile)
+    hvac_state.aux = previous_state['aux']
+    hvac_state.toggle = previous_state['toggle']
+    hvac_state.mode = previous_state['mode']
+    last_fetch_time = hvac_state.fetch_hvac_state()
+    client.loop(0)
+    previous_state = {'aux': hvac_state.aux,
+                      'action': hvac_state.action,
+                      'hvac_code': hvac_state.hvac_code,
+                      'mode': hvac_state.mode,
+                      'status': hvac_state.status,
+                      'toggle': hvac_state.toggle,
+                      }
+    client.publish('hvac/state/aux',
+                   BoolValue(previous_state['aux']).name)
+    client.publish('hvac/state/mode',
+                   ModeValue(previous_state['mode']).name)
+    client.publish('hvac/state/toggle',
+                   BoolValue(previous_state['toggle']).name)
+    client.publish('hvac/state/action',
+                   ActionValue(previous_state['action']).name)
+    client.publish('hvac/state/status',
+                   json.dumps({'status': previous_state['status']}))
 
-    action = hvac_state.action
-    aux = hvac_state.aux
-    hvac_code = hvac_state.hvac_code
-    mode = hvac_state.mode
-    toggle = hvac_state.toggle
-    status = hvac_state.status
-    debug("action: %s, aux: %s, hc: %d, mode: %s, toggle: %s",
-          ActionValue(action).name,
-          BoolValue(aux).name,
-          hvac_code,
-          ModeValue(mode).name,
-          BoolValue(toggle).name
-          )
+    info("Starting main loop")
     while True:
+        debug("action: %s, aux: %s, hc: %d, mode: %s, toggle: %s",
+              ActionValue(previous_state['action']).name,
+              BoolValue(previous_state['aux']).name,
+              previous_state['hvac_code'],
+              ModeValue(previous_state['mode']).name,
+              BoolValue(previous_state['toggle']).name
+              )
         debug("running mqtt loop")
         client.loop(5)
-        debug("action: %s, aux: %s, hc: %d, mode: %s, toggle: %s",
-              ActionValue(action).name,
-              BoolValue(aux).name,
-              hvac_code,
-              ModeValue(mode).name,
-              BoolValue(toggle).name
-              )
-        if aux != hvac_state.aux:
-            aux = hvac_state.aux
-            info("Publishing aux: %s", BoolValue(aux).name)
-            client.publish('hvac/state/aux', BoolValue(aux).name)
-        if hvac_code == hvac_state.hvac_code:
-            if mode != hvac_state.mode:
+
+        if previous_state['hvac_code'] == hvac_state.hvac_code:
+            if previous_state['aux'] != hvac_state.aux:
+                aux = hvac_state.aux
+                info("Publishing aux: %s", BoolValue(aux).name)
+                client.publish('hvac/state/aux', BoolValue(aux).name)
+                previous_state['aux'] = aux
+            if previous_state['mode'] != hvac_state.mode:
                 mode = hvac_state.mode
                 info("Publishing mode: %s", ModeValue(mode).name)
                 client.publish('hvac/state/mode', ModeValue(mode).name)
-            if toggle != hvac_state.toggle:
+                previous_state['mode'] = mode
+            if previous_state['toggle'] != hvac_state.toggle:
                 toggle = hvac_state.toggle
                 info("Publishing switch state: %s", BoolValue(toggle).name)
                 client.publish('hvac/state/toggle', BoolValue(toggle).name)
-            if action != hvac_state.action:
+                previous_state['toggle'] = toggle
+            if previous_state['action'] != hvac_state.action:
                 action = hvac_state.action
                 info("Publishing action: %s", ActionValue(action).name)
                 client.publish('hvac/state/action', ActionValue(action).name)
-            hvac_state.fetch_hvac_state()
+                previous_state['action'] = action
+            if previous_state['status'] != hvac_state.status:
+                status = hvac_state.status
+                info("Publishing status: %s", status)
+                client.publish('hvac/state/status',
+                               json.dumps({'status': status}))
+                previous_state['status'] = status
+            if datetime.now() - last_fetch_time >= timedelta(seconds=2):
+                last_fetch_time = hvac_state.fetch_hvac_state()
 
         else:
             hc = hvac_state.hvac_code
             info("Sending new state to hvac: %s", hc)
             hvac_state.change_hvac_state(hc)
-            hvac_state.fetch_hvac_state()
-            hvac_code = hvac_state.hvac_code
-
-        if status != hvac_state.status:
-            status = hvac_state.status
-            info("Publishing status: %s", status)
-            client.publish('hvac/state/status',
-                           json.dumps({'status': status}))
+            last_fetch_time = hvac_state.fetch_hvac_state()
+            previous_state['hvac_code'] = hvac_state.hvac_code
+            save_state(statefile, previous_state)
 
 
 def main(port, broker_address):
     hvac_state = HvacState()
     client = mqtt.Client("HVAC")
 
+    info("Setting up serial device")
     hvac_state.serial = setup_serial(port, 9600, 1)
 
-    info("creating new instance")
     client.on_message = hvac_state.on_mqtt_message
 
-    info("connecting to broker %s", broker_address)
+    info("Connecting to mqtt broker %s", broker_address)
     client.connect(broker_address)
 
     info("Subscribing to topics")
     client.subscribe("hvac/call/aux")
     client.subscribe("hvac/call/mode")
     client.subscribe("hvac/call/toggle")
-    loop(client, hvac_state)
+
+    statefile = choose_state_file()
+
+    loop(client, hvac_state, statefile)
 
 
 if __name__ == "__main__":
